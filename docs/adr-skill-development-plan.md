@@ -550,6 +550,7 @@ The two long poles — **M1 (writer)** and **M2/M3 (prompt + evals)** — share 
 
 ---
 
+<<<<<<< HEAD
 ## 12a. Build status — 2026-08-12
 
 The **v1 capture pipeline is implemented and tested**: 247 tests pass on Python 3.9
@@ -579,6 +580,8 @@ payloads were still present; and a symlink refusal that misreported the cause.
 
 ---
 
+=======
+>>>>>>> origin/main
 ## 13. Revision log — adversarial review (2026-08-12)
 
 Plan v1.0 was reviewed by a second agent (Codex, read-only, high effort) briefed to attack eight contested decisions. Verdicts: C1 runtime, C3 transaction-machinery-given-the-PRD, C4 preview-time digest and C7 eval packaging upheld; C5 eval validity, C6 provenance enforcement and C8 sizing overturned; C2 frontmatter ruled under-specified.

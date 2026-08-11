@@ -6,6 +6,7 @@ test:
 
 lint:
 	$(PY) -m compileall -q skills/adr/scripts/adr_scribe
+<<<<<<< HEAD
 	$(PY) -m compileall -q tests
 
 # Validates SKILL.md against the Agent Skills spec rules we rely on:
@@ -15,3 +16,7 @@ check-skill:
 	@$(PY) tools/check_skill.py skills/adr
 
 .PHONY: test lint check-skill
+=======
+
+.PHONY: test lint
+>>>>>>> origin/main

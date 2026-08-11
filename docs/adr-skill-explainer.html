@@ -477,11 +477,15 @@
   <section>
     <p class="eyebrow">Part 6</p>
     <h2>What exists right now</h2>
+<<<<<<< HEAD
     <p class="sub">
       <strong>247 tests pass on Python 3.9 and 3.14.</strong> The capture pipeline is complete: it
       installs through the real <code>npx skills</code> CLI and writes a valid record in a fresh
       repository end to end.
     </p>
+=======
+    <p class="sub">Built and tested overnight. 165 tests pass on Python 3.9 and 3.14.</p>
+>>>>>>> origin/main
     <div class="scroll">
       <table>
         <thead><tr><th>Component</th><th>Built by</th><th>Tests</th><th>State</th></tr></thead>
@@ -490,6 +494,7 @@
           <tr><td><code>digest.py</code> — content + patch digests</td><td>Codex</td><td>38</td><td class="status-ok">landed</td></tr>
           <tr><td><code>_frontmatter.py</code> — canonical parser</td><td>Claude CLI, finished in-session</td><td>81</td><td class="status-ok">landed</td></tr>
           <tr><td><code>index.py</code> — generated block</td><td>orchestrator</td><td>21</td><td class="status-ok">landed</td></tr>
+<<<<<<< HEAD
           <tr><td><code>validate.py</code> — schema + safety backstop</td><td>orchestrator</td><td>28</td><td class="status-ok">landed</td></tr>
           <tr><td><code>paths.py</code> — symlink-hostile path layer</td><td>orchestrator</td><td>26</td><td class="status-ok">landed</td></tr>
           <tr><td><code>gitcmd.py</code> — hardened read-only git</td><td>orchestrator</td><td>covered</td><td class="status-ok">landed</td></tr>
@@ -501,10 +506,17 @@
           <tr><td>cross-module integration</td><td>orchestrator</td><td>10</td><td class="status-ok">landed</td></tr>
           <tr><td>Acceptance &amp; supersession (v1.1)</td><td>—</td><td>—</td><td class="status-todo">deferred by design</td></tr>
           <tr><td>Behavioural evals (significance / provenance)</td><td>—</td><td>—</td><td class="status-block">needs your fixtures</td></tr>
+=======
+          <tr><td>cross-module integration</td><td>orchestrator</td><td>10</td><td class="status-ok">landed</td></tr>
+          <tr><td><code>validate-adr</code>, <code>render-index</code>, <code>prepare-record</code></td><td>—</td><td>—</td><td class="status-todo">next</td></tr>
+          <tr><td><code>apply-record</code> — the transaction</td><td>—</td><td>—</td><td class="status-block">blocked on a decision</td></tr>
+          <tr><td><code>SKILL.md</code> + references</td><td>—</td><td>—</td><td class="status-todo">after the writer</td></tr>
+>>>>>>> origin/main
         </tbody>
       </table>
     </div>
 
+<<<<<<< HEAD
     <p class="k" style="margin-top:16px">
       Verified against attack, not just against success: tampering with one byte of a record breaks its
       digest; hand-editing the generated index block is caught as drift; <code>curl … | sh</code> smuggled
@@ -535,6 +547,21 @@
       list fields; a recovery routine that gave up while its own staged payloads were still on disk; and
       a symlink refusal that reported "not a directory" for what was actually a symlink. All fixed, all
       with regression tests.
+=======
+    <div class="note">
+      <strong>The blocking decision.</strong> If the index stays part of the approved patch, the full
+      eleven-step protocol in Part 4 is required. If the index instead becomes a <em>derived</em> file —
+      regenerated on demand rather than approved — then a single atomic file creation does the whole job,
+      and the lock, journal, preimage, phase machine and most of the recovery matrix disappear. That
+      roughly halves the largest remaining milestone, but it changes what the PRD requires, so it is
+      yours to decide.
+    </div>
+
+    <p class="k">
+      Two defects were caught by review that no single implementer could have caught alone: a regex
+      anchor that let a filename contain a newline, and a contract of mine that couldn't represent a real
+      record's list fields. Both are fixed, both have regression tests.
+>>>>>>> origin/main
     </p>
   </section>
 
