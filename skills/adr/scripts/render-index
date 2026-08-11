@@ -1,0 +1,115 @@
+#!/usr/bin/env python3
+"""Render the generated ADR index block deterministically.
+
+    render-index --repo ROOT --stdout     # print the full index file content
+    render-index --repo ROOT --check      # exit 3 if the on-disk index has drifted
+
+The index is generated output reproduced from ADR frontmatter. Content outside
+the marker block is preserved byte for byte. After a merge conflict inside the
+generated block, regenerate -- never treat the index as a source of truth.
+
+This command NEVER writes. `apply-record` owns every repository write, because
+only it holds the lock and the journal.
+
+Exit codes: 0 ok · 1 an ADR could not be read/parsed · 2 usage error ·
+3 drift detected (--check) · 5 unsupported environment.
+"""
+
+import argparse
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from adr_scribe import _frontmatter as fm  # noqa: E402
+from adr_scribe import index as idx  # noqa: E402
+
+ADR_DIRNAME = os.path.join("docs", "adr")
+INDEX_NAME = "README.md"
+ROW_FIELDS = ("id", "title", "status", "date", "summary")
+
+
+def load_records(adr_dir):
+    records, problems = [], []
+    if not os.path.isdir(adr_dir):
+        return records, problems
+    for name in sorted(os.listdir(adr_dir)):
+        if not (name.startswith("adr-") and name.endswith(".md")):
+            continue
+        path = os.path.join(adr_dir, name)
+        try:
+            with open(path, "rb") as handle:
+                raw = handle.read()
+            front, _body = fm.split_document(raw)
+            parsed = fm.parse(front)
+        except (OSError, fm.FrontmatterError) as exc:
+            problems.append("%s: %s" % (path, exc))
+            continue
+        missing = [f for f in ROW_FIELDS if f not in parsed]
+        if missing:
+            problems.append("%s: missing frontmatter field(s): %s"
+                            % (path, ", ".join(missing)))
+            continue
+        records.append({f: parsed[f] for f in ROW_FIELDS})
+    return records, problems
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(prog="render-index")
+    parser.add_argument("--repo", required=True, help="repository root")
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--stdout", action="store_true",
+                      help="print the full index file content")
+    mode.add_argument("--check", action="store_true",
+                      help="exit 3 if the on-disk index differs from the render")
+    args = parser.parse_args(argv)
+
+    repo = os.path.abspath(args.repo)
+    if not os.path.isdir(repo):
+        sys.stderr.write("render-index: not a directory: %s\n" % repo)
+        return 5
+
+    adr_dir = os.path.join(repo, ADR_DIRNAME)
+    index_path = os.path.join(adr_dir, INDEX_NAME)
+
+    records, problems = load_records(adr_dir)
+    if problems:
+        for problem in problems:
+            sys.stderr.write("render-index: %s\n" % problem)
+        return 1
+
+    existing = None
+    if os.path.exists(index_path):
+        try:
+            with open(index_path, "rb") as handle:
+                existing = handle.read().decode("utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            sys.stderr.write("render-index: cannot read index: %s\n" % exc)
+            return 1
+
+    try:
+        rendered = idx.render_index(existing, records)
+    except idx.IndexRenderError as exc:
+        sys.stderr.write("render-index: %s\n" % exc)
+        return 1
+
+    if args.stdout:
+        sys.stdout.write(rendered)
+        return 0
+
+    if existing is None:
+        sys.stderr.write("render-index: no index at %s (bootstrap required)\n" % index_path)
+        return 3
+    if existing != rendered:
+        sys.stderr.write(
+            "render-index: index has drifted from the ADR frontmatter; "
+            "regenerate it through an approved patch\n")
+        return 3
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        sys.exit(130)

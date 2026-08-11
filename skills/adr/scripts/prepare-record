@@ -1,0 +1,184 @@
+#!/usr/bin/env python3
+"""Build the exact bytes a patch would write, without touching the repository.
+
+    prepare-record --repo ROOT --input record.json --out STAGE
+
+Writes the staged payloads and `patch.json` into STAGE, which must live OUTSIDE
+the repository -- nothing may appear in the working tree before approval.
+Prints a human-readable preview to stdout.
+
+The digest and the rendered index are computed HERE, at preview time. If they
+were computed during apply, the written bytes would differ from the approved
+bytes and the approval would be meaningless.
+
+Exit codes: 0 ok · 1 record/render error · 2 usage · 3 index drift · 5 environment.
+"""
+
+import argparse
+import datetime
+import json
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from adr_scribe import _frontmatter as fm  # noqa: E402
+from adr_scribe import digest as D  # noqa: E402
+from adr_scribe import gitcmd, index as idx, record as R, validate as V  # noqa: E402
+from adr_scribe.transaction import sha256_bytes  # noqa: E402
+
+ADR_REL = "docs/adr"
+INDEX_REL = "docs/adr/README.md"
+ROW_FIELDS = ("id", "title", "status", "date", "summary")
+
+
+def existing_records(repo):
+    directory = os.path.join(repo, ADR_REL)
+    rows = []
+    if not os.path.isdir(directory):
+        return rows
+    for name in sorted(os.listdir(directory)):
+        if not (name.startswith("adr-") and name.endswith(".md")):
+            continue
+        with open(os.path.join(directory, name), "rb") as handle:
+            front, _ = fm.split_document(handle.read())
+        parsed = fm.parse(front)
+        rows.append({f: parsed[f] for f in ROW_FIELDS})
+    return rows
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(prog="prepare-record")
+    parser.add_argument("--repo", required=True)
+    parser.add_argument("--input", required=True, help="structured record JSON")
+    parser.add_argument("--out", required=True, help="staging dir OUTSIDE the repo")
+    parser.add_argument("--ulid", help="pin the ULID (tests only)")
+    parser.add_argument("--today", help="pin the date (tests only)")
+    parser.add_argument("--json", action="store_true", help="machine-readable preview")
+    args = parser.parse_args(argv)
+
+    repo = os.path.abspath(args.repo)
+    stage = os.path.abspath(args.out)
+    if not os.path.isdir(repo):
+        sys.stderr.write("prepare-record: not a directory: %s\n" % repo)
+        return 5
+    if stage == repo or stage.startswith(repo + os.sep):
+        sys.stderr.write(
+            "prepare-record: --out must be outside the repository; nothing may "
+            "appear in the working tree before approval\n")
+        return 2
+
+    try:
+        with open(args.input, "rb") as handle:
+            record = json.loads(handle.read().decode("utf-8"))
+    except (OSError, ValueError) as exc:
+        sys.stderr.write("prepare-record: cannot read record: %s\n" % exc)
+        return 1
+
+    today = args.today or datetime.date.today().isoformat()
+    try:
+        built = R.build(record, today, ulid=args.ulid)
+    except (R.RecordError, ValueError) as exc:
+        sys.stderr.write("prepare-record: %s\n" % exc)
+        return 1
+
+    findings = V.errors(V.validate_document(built.content))
+    if findings:
+        for finding in findings:
+            sys.stderr.write("prepare-record: [%s] %s\n" % (finding.code, finding.message))
+        return 1
+
+    adr_rel = "%s/%s" % (ADR_REL, built.filename)
+    if os.path.exists(os.path.join(repo, adr_rel)):
+        sys.stderr.write("prepare-record: %s already exists\n" % adr_rel)
+        return 1
+
+    # Cheap preconditions first: an uncommitted edit to a target must be
+    # reported as such, not masked by a later rendering error on the same file.
+    dirty = gitcmd.is_dirty_paths(repo, [adr_rel, INDEX_REL])
+    if dirty:
+        sys.stderr.write("prepare-record: refusing -- uncommitted changes overlap "
+                         "the targets: %s\n" % ", ".join(dirty))
+        return 1
+
+    # Index: rendered now, so the preview shows its final bytes.
+    try:
+        rows = existing_records(repo)
+    except fm.FrontmatterError as exc:
+        sys.stderr.write("prepare-record: existing ADR is unreadable: %s\n" % exc)
+        return 1
+    index_path = os.path.join(repo, INDEX_REL)
+    existing_index = None
+    expect_index = None
+    if os.path.exists(index_path):
+        with open(index_path, "rb") as handle:
+            raw = handle.read()
+        expect_index = sha256_bytes(raw)
+        existing_index = raw.decode("utf-8")
+    try:
+        index_text = idx.render_index(existing_index, rows + [built.index_row()])
+    except idx.IndexRenderError as exc:
+        sys.stderr.write("prepare-record: %s\n" % exc)
+        return 3
+    index_bytes = index_text.encode("utf-8")
+
+    ops = [
+        {"op": "create-file", "path": adr_rel,
+         "len": len(built.content), "sha256": sha256_bytes(built.content)},
+        {"op": "replace-file", "path": INDEX_REL,
+         "len": len(index_bytes), "sha256": sha256_bytes(index_bytes),
+         "expect-sha256": expect_index},
+    ]
+    for missing in ("docs", ADR_REL):
+        if not os.path.isdir(os.path.join(repo, missing)):
+            ops.append({"op": "create-dir", "path": missing})
+    ops.sort(key=lambda o: o["path"].encode("utf-8"))
+
+    patch = {
+        "patch-version": 1,
+        "repo-relative-ops": ops,
+        "preconditions": {"head": gitcmd.head_commit(repo), "dirty-overlap": []},
+    }
+    try:
+        patch_digest = D.patch_digest(patch)
+    except D.DigestError as exc:
+        sys.stderr.write("prepare-record: %s\n" % exc)
+        return 1
+
+    os.makedirs(stage, exist_ok=True)
+    payload_dir = os.path.join(stage, "payloads")
+    os.makedirs(payload_dir, exist_ok=True)
+    for rel, data in ((adr_rel, built.content), (INDEX_REL, index_bytes)):
+        with open(os.path.join(payload_dir, rel.replace("/", "__")), "wb") as handle:
+            handle.write(data)
+    with open(os.path.join(stage, "patch.json"), "w", encoding="utf-8") as handle:
+        json.dump({"patch": patch, "patch-digest": patch_digest,
+                   "payload-dir": payload_dir, "repo": repo},
+                  handle, indent=2, sort_keys=True)
+        handle.write("\n")
+
+    if args.json:
+        json.dump({"patch-digest": patch_digest, "id": built.record_id,
+                   "files": [o["path"] for o in ops], "stage": stage},
+                  sys.stdout, indent=2)
+        sys.stdout.write("\n")
+    else:
+        sys.stdout.write("PROPOSED PATCH  (nothing has been written)\n")
+        sys.stdout.write("=" * 66 + "\n")
+        for op in ops:
+            sys.stdout.write("  %-12s %s\n" % (op["op"], op["path"]))
+        sys.stdout.write("  patch-digest %s\n\n" % patch_digest)
+        sys.stdout.write("--- %s ---\n" % adr_rel)
+        sys.stdout.write(built.content.decode("utf-8"))
+        sys.stdout.write("\n--- %s (generated block) ---\n" % INDEX_REL)
+        sys.stdout.write(index_text)
+        sys.stdout.write("\n" + "=" * 66 + "\n")
+        sys.stdout.write("Approve this exact patch for writing?\n")
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        sys.exit(130)

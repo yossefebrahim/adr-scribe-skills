@@ -1,0 +1,120 @@
+#!/usr/bin/env python3
+"""Execute an approved patch, or recover an interrupted one.
+
+    apply-record --patch STAGE/patch.json --approved-digest sha256:...
+    apply-record --repo ROOT --recover [--rollback] [--force-reclaim]
+
+Writes documentation only. It cannot stage, commit, push or fetch -- there is
+no code path here that mutates git.
+
+Exit codes:
+    0 success
+    2 precondition mismatch BEFORE any write (re-preview and re-approve)
+    3 lock held by a live owner
+    4 failed AFTER a write, or verification failed (run --recover)
+    5 unsupported environment
+    6 needs explicit human confirmation (--force-reclaim)
+    7 refused for safety
+"""
+
+import argparse
+import json
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from adr_scribe import journal as J  # noqa: E402
+from adr_scribe import paths as P  # noqa: E402
+from adr_scribe import transaction as T  # noqa: E402
+
+
+def _emit(payload, as_json):
+    if as_json:
+        json.dump(payload, sys.stdout, indent=2, sort_keys=True)
+        sys.stdout.write("\n")
+    else:
+        for key in sorted(payload):
+            sys.stdout.write("%-16s %s\n" % (key, payload[key]))
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(prog="apply-record")
+    parser.add_argument("--patch", help="patch.json produced by prepare-record")
+    parser.add_argument("--approved-digest",
+                        help="the digest the human approved; must match the patch")
+    parser.add_argument("--repo", help="repository root (with --recover)")
+    parser.add_argument("--recover", action="store_true")
+    parser.add_argument("--rollback", action="store_true")
+    parser.add_argument("--force-reclaim", action="store_true")
+    parser.add_argument("--stale-seconds", type=int, default=J.DEFAULT_STALE_SECONDS)
+    parser.add_argument("--json", action="store_true")
+    args = parser.parse_args(argv)
+
+    if args.recover:
+        if not args.repo:
+            parser.error("--recover requires --repo")
+        try:
+            result = T.recover(args.repo, rollback=args.rollback,
+                               force_reclaim=args.force_reclaim)
+        except T.TransactionError as exc:
+            sys.stderr.write("apply-record: %s\n" % exc)
+            return exc.code
+        except P.PathError as exc:
+            sys.stderr.write("apply-record: %s\n" % exc)
+            return T.E_ENVIRONMENT
+        _emit(result, args.json)
+        return 0
+
+    if not args.patch or not args.approved_digest:
+        parser.error("--patch and --approved-digest are required")
+
+    try:
+        with open(args.patch, "rb") as handle:
+            bundle = json.loads(handle.read().decode("utf-8"))
+    except (OSError, ValueError) as exc:
+        sys.stderr.write("apply-record: cannot read patch: %s\n" % exc)
+        return 2
+
+    patch = bundle["patch"]
+    repo = args.repo or bundle["repo"]
+    payload_dir = bundle["payload-dir"]
+
+    payloads = {}
+    for op in patch["repo-relative-ops"]:
+        if op["op"] == "create-dir":
+            continue
+        staged = os.path.join(payload_dir, op["path"].replace("/", "__"))
+        try:
+            with open(staged, "rb") as handle:
+                payloads[op["path"]] = handle.read()
+        except OSError as exc:
+            sys.stderr.write("apply-record: missing staged payload for %s (%s)\n"
+                             % (op["path"], exc))
+            return 2
+
+    try:
+        result = T.apply(repo, patch, payloads,
+                         approved_digest=args.approved_digest,
+                         patch_digest=bundle["patch-digest"],
+                         stale_seconds=args.stale_seconds)
+    except T.TransactionError as exc:
+        sys.stderr.write("apply-record: %s\n" % exc)
+        if exc.code == T.E_AFTER_WRITE:
+            sys.stderr.write(
+                "apply-record: the repository may hold a partial write. "
+                "Run `apply-record --repo %s --recover` -- do not re-apply.\n" % repo)
+        return exc.code
+    except P.PathError as exc:
+        sys.stderr.write("apply-record: %s\n" % exc)
+        return T.E_REFUSED
+
+    _emit(result, args.json)
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        sys.exit(130)
