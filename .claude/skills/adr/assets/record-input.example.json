@@ -1,0 +1,71 @@
+{
+  "title": "<short, decision-first title>",
+  "summary": "In the context of <use case>, facing <concern>, we decided for <option> to achieve <quality>, accepting <downside>.",
+  "decision-makers": [
+    "<decision-maker>"
+  ],
+  "consulted": [],
+  "informed": [],
+  "applies-to": [
+    "path/to/subsystem/**"
+  ],
+  "confirmed-by": [
+    "<approver>"
+  ],
+  "context": "<what forced a choice; state known evidence limitations>",
+  "drivers": [
+    "<constraint the developer stated or confirmed>"
+  ],
+  "considered-options": [
+    {
+      "name": "<chosen option>",
+      "chosen": true,
+      "pros": [
+        "<supported argument>"
+      ],
+      "cons": [
+        "<supported trade-off>"
+      ]
+    },
+    {
+      "name": "<presented alternative>",
+      "chosen": false,
+      "pros": [],
+      "cons": [],
+      "rejection-reason": null
+    }
+  ],
+  "decision-outcome": "<developer-stated or developer-confirmed reason>",
+  "consequences": {
+    "good": [
+      "<supported consequence>"
+    ],
+    "bad": [
+      "<accepted cost>"
+    ]
+  },
+  "confirmation": {
+    "manual": [
+      "<review step>"
+    ],
+    "commands": []
+  },
+  "rules": [
+    "MUST: <imperative, checkable rule>"
+  ],
+  "provenance": {
+    "context": "code-observed",
+    "decision": "developer-stated",
+    "drivers": "developer-confirmed",
+    "alternatives": "developer-stated",
+    "consequences": "developer-confirmed",
+    "rules": "developer-confirmed"
+  },
+  "evidence": {
+    "commits": [],
+    "working-tree-files": [
+      "path/to/component.ext"
+    ]
+  },
+  "more-information": "<links, PRs, evidence limitations. Never paste transcripts.>"
+}

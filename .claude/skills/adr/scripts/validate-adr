@@ -1,0 +1,115 @@
+#!/usr/bin/env python3
+"""Validate ADR files against the adr-scribe/v1 schema and safety rules.
+
+    validate-adr FILE [FILE...]
+    validate-adr --repo ROOT --all
+    validate-adr --repo ROOT --all --json
+
+Exit codes: 0 valid (warnings allowed) · 1 validation errors found ·
+2 usage error · 5 unsupported environment.
+
+Reads only. Never writes, never executes anything it finds in a record.
+"""
+
+import argparse
+import json
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from adr_scribe import validate as V  # noqa: E402
+
+ADR_DIR = os.path.join("docs", "adr")
+
+
+def collect(repo):
+    directory = os.path.join(repo, ADR_DIR)
+    if not os.path.isdir(directory):
+        return []
+    found = []
+    for name in sorted(os.listdir(directory)):
+        if name.startswith("adr-") and name.endswith(".md"):
+            found.append(os.path.join(directory, name))
+    return found
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(prog="validate-adr", add_help=True)
+    parser.add_argument("files", nargs="*", help="ADR files to validate")
+    parser.add_argument("--repo", help="repository root (with --all)")
+    parser.add_argument("--all", action="store_true",
+                        help="validate every ADR under <repo>/docs/adr/")
+    parser.add_argument("--json", action="store_true", help="emit a JSON report")
+    args = parser.parse_args(argv)
+
+    if args.all:
+        if not args.repo:
+            parser.error("--all requires --repo")
+        targets = collect(args.repo)
+    else:
+        targets = args.files
+    if not targets:
+        if args.json:
+            json.dump({"files": [], "errors": 0, "warnings": 0}, sys.stdout)
+            sys.stdout.write("\n")
+        else:
+            sys.stderr.write("validate-adr: nothing to validate\n")
+        return 0
+
+    report = []
+    total_errors = total_warnings = 0
+    seen_ids = {}
+
+    for path in targets:
+        try:
+            with open(path, "rb") as handle:
+                raw = handle.read()
+        except OSError as exc:
+            findings = [V.Finding("error", "io", "cannot read: %s" % exc)]
+        else:
+            findings = V.validate_document(raw)
+            # duplicate-id detection across the whole set
+            try:
+                fm_text, _ = V._fm.split_document(raw)
+                rid = V._fm.parse(fm_text).get("id")
+            except Exception:
+                rid = None
+            if isinstance(rid, str):
+                if rid in seen_ids:
+                    findings.append(V.Finding(
+                        "error", "duplicate-id",
+                        "id %s already used by %s" % (rid, seen_ids[rid])))
+                else:
+                    seen_ids[rid] = path
+
+        errs, warns = V.summarize(findings)
+        total_errors += errs
+        total_warnings += warns
+        report.append({"path": path,
+                       "findings": [f.as_dict() for f in findings]})
+
+    if args.json:
+        json.dump({"files": report, "errors": total_errors,
+                   "warnings": total_warnings}, sys.stdout, indent=2)
+        sys.stdout.write("\n")
+    else:
+        for entry in report:
+            if not entry["findings"]:
+                sys.stdout.write("ok      %s\n" % entry["path"])
+                continue
+            for finding in entry["findings"]:
+                sys.stdout.write("%-7s %s: [%s] %s\n" % (
+                    finding["level"], entry["path"],
+                    finding["code"], finding["message"]))
+        sys.stdout.write("\n%d error(s), %d warning(s) across %d file(s)\n"
+                         % (total_errors, total_warnings, len(report)))
+
+    return 1 if total_errors else 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        sys.exit(130)

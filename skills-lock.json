@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "adr": {
+      "source": "yossefebrahim/adr-scribe-skills",
+      "sourceType": "github",
+      "skillPath": "skills/adr/SKILL.md",
+      "computedHash": "20248b13fb9bd03114ac80ca82698b8a8a1f554d3d3d7b0db36dce887315d96e"
+    }
+  }
+}
