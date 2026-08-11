@@ -1,0 +1,523 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How the /adr skill works</title>
+<style>
+  :root{
+    --bg:#fbfaf8; --panel:#ffffff; --ink:#1a1a19; --muted:#6b6a66; --line:#e4e1da;
+    --accent:#9a5b2c; --accent-soft:#f4ece4; --ok:#2f6b46; --warn:#8a6321; --stop:#8f3436;
+    --code-bg:#f5f3ef; --shadow:0 1px 2px rgba(0,0,0,.05),0 8px 24px rgba(0,0,0,.04);
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --bg:#141413; --panel:#1c1c1a; --ink:#eceae5; --muted:#9d9a93; --line:#2e2d2a;
+      --accent:#d99a63; --accent-soft:#2a221b; --ok:#7cc79b; --warn:#d9b476; --stop:#e08f8f;
+      --code-bg:#232320; --shadow:0 1px 2px rgba(0,0,0,.3),0 8px 24px rgba(0,0,0,.25);
+    }
+  }
+  :root[data-theme="light"]{
+    --bg:#fbfaf8; --panel:#ffffff; --ink:#1a1a19; --muted:#6b6a66; --line:#e4e1da;
+    --accent:#9a5b2c; --accent-soft:#f4ece4; --ok:#2f6b46; --warn:#8a6321; --stop:#8f3436;
+    --code-bg:#f5f3ef; --shadow:0 1px 2px rgba(0,0,0,.05),0 8px 24px rgba(0,0,0,.04);
+  }
+  :root[data-theme="dark"]{
+    --bg:#141413; --panel:#1c1c1a; --ink:#eceae5; --muted:#9d9a93; --line:#2e2d2a;
+    --accent:#d99a63; --accent-soft:#2a221b; --ok:#7cc79b; --warn:#d9b476; --stop:#e08f8f;
+    --code-bg:#232320; --shadow:0 1px 2px rgba(0,0,0,.3),0 8px 24px rgba(0,0,0,.25);
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font:16px/1.65 ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:960px;margin:0 auto;padding:56px 22px 96px}
+  code,pre,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  code{background:var(--code-bg);padding:.12em .38em;border-radius:4px;font-size:.88em}
+  pre{background:var(--code-bg);border:1px solid var(--line);border-radius:10px;padding:14px 16px;
+      overflow-x:auto;font-size:13px;line-height:1.55}
+  pre code{background:none;padding:0}
+  h1{font-size:clamp(30px,5vw,44px);line-height:1.12;letter-spacing:-.022em;margin:0 0 14px;font-weight:640}
+  h2{font-size:clamp(21px,3vw,27px);letter-spacing:-.014em;margin:0 0 6px;font-weight:620}
+  h3{font-size:16px;margin:0 0 6px;font-weight:640}
+  p{margin:0 0 14px}
+  .lede{font-size:19px;color:var(--muted);max-width:64ch;margin-bottom:26px}
+  .eyebrow{font-size:12px;letter-spacing:.11em;text-transform:uppercase;color:var(--accent);
+           font-weight:660;margin:0 0 10px}
+  section{margin:52px 0 0;padding-top:26px;border-top:1px solid var(--line)}
+  section:first-of-type{border-top:none}
+  .sub{color:var(--muted);max-width:66ch;margin-bottom:22px}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px 22px;
+         box-shadow:var(--shadow);margin:18px 0}
+  .scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  table{border-collapse:collapse;width:100%;font-size:14.5px;min-width:520px}
+  th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{font-size:12px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);font-weight:640}
+  tr:last-child td{border-bottom:none}
+
+  /* stage list */
+  .stage{display:grid;grid-template-columns:64px 1fr;gap:18px;padding:18px 0;border-bottom:1px solid var(--line)}
+  .stage:last-child{border-bottom:none}
+  .tag{font:620 12px/1 ui-monospace,monospace;color:var(--accent);background:var(--accent-soft);
+       border-radius:6px;padding:7px 0;text-align:center;height:fit-content;letter-spacing:.04em}
+  .stage h3{margin-bottom:4px}
+  .stage p{margin:0 0 8px;color:var(--muted);font-size:15px}
+  .meta{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+  .chip{font-size:11.5px;border:1px solid var(--line);border-radius:999px;padding:3px 9px;color:var(--muted);
+        background:var(--bg)}
+  .chip.load{border-color:var(--accent);color:var(--accent)}
+  .chip.exit{border-color:var(--stop);color:var(--stop)}
+  .chip.run{border-color:var(--ok);color:var(--ok)}
+
+  .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px}
+  .note{border-left:3px solid var(--accent);background:var(--accent-soft);border-radius:0 10px 10px 0;
+        padding:14px 18px;margin:18px 0}
+  .note.stop{border-left-color:var(--stop);background:transparent;border:1px solid var(--line);border-left:3px solid var(--stop)}
+  .note strong{font-weight:640}
+  .k{color:var(--muted);font-size:13px}
+  ul{margin:0 0 14px;padding-left:20px}
+  li{margin:5px 0}
+  svg{max-width:100%;height:auto;display:block}
+  .legend{display:flex;flex-wrap:wrap;gap:14px;font-size:12.5px;color:var(--muted);margin-top:10px}
+  .sw{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:middle}
+  footer{margin-top:60px;padding-top:22px;border-top:1px solid var(--line);color:var(--muted);font-size:13.5px}
+  .status-ok{color:var(--ok);font-weight:620}
+  .status-todo{color:var(--muted)}
+  .status-block{color:var(--warn);font-weight:620}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <p class="eyebrow">adr-scribe · internal alpha</p>
+  <h1>How the <span class="mono">/adr</span> skill works</h1>
+  <p class="lede">
+    A Claude Code skill that captures an architecture decision <em>while the evidence is still in the
+    conversation</em> — then refuses to write anything it cannot attribute to you.
+  </p>
+
+  <div class="panel">
+    <p style="margin:0">
+      <strong>The one-sentence version.</strong> You type <code>/adr</code>. The agent reads the session
+      you just had plus your working tree, decides whether a real architectural decision happened,
+      classifies every claim by where the evidence came from, asks at most three questions, shows you
+      the <em>exact bytes</em> it wants to write, and writes them only after you say yes — through a
+      crash-safe transaction that never touches git.
+    </p>
+  </div>
+
+  <!-- ============================================= -->
+  <section>
+    <p class="eyebrow">Part 1</p>
+    <h2>The cycle</h2>
+    <p class="sub">
+      Nine stages. Four of them can end the run without writing anything — that is the design, not a
+      failure mode. "No ADR needed" is a normal outcome.
+    </p>
+
+    <svg viewBox="0 0 900 210" role="img" aria-label="Flow from invocation through evidence, significance, provenance, interview, preview, approval, apply, report">
+      <defs>
+        <marker id="ah" markerWidth="9" markerHeight="9" refX="7" refY="3.2" orient="auto">
+          <path d="M0,0 L7,3.2 L0,6.4 z" fill="currentColor"/>
+        </marker>
+      </defs>
+      <g fill="none" stroke="currentColor" stroke-width="1.6" color="var(--muted)" marker-end="url(#ah)">
+        <line x1="118" y1="60" x2="152" y2="60"/>
+        <line x1="258" y1="60" x2="292" y2="60"/>
+        <line x1="398" y1="60" x2="432" y2="60"/>
+        <line x1="538" y1="60" x2="572" y2="60"/>
+        <line x1="678" y1="60" x2="712" y2="60"/>
+      </g>
+      <g font-family="ui-sans-serif,system-ui" font-size="13">
+        <g>
+          <rect x="18" y="38" width="100" height="44" rx="9" fill="var(--accent-soft)" stroke="var(--accent)"/>
+          <text x="68" y="60" text-anchor="middle" fill="var(--accent)" font-weight="640">/adr</text>
+          <text x="68" y="74" text-anchor="middle" fill="var(--accent)" font-size="10.5">S0 preflight</text>
+        </g>
+        <g>
+          <rect x="152" y="38" width="106" height="44" rx="9" fill="var(--panel)" stroke="var(--line)"/>
+          <text x="205" y="60" text-anchor="middle" fill="var(--ink)">evidence</text>
+          <text x="205" y="74" text-anchor="middle" fill="var(--muted)" font-size="10.5">S1 read-only</text>
+        </g>
+        <g>
+          <rect x="292" y="38" width="106" height="44" rx="9" fill="var(--panel)" stroke="var(--line)"/>
+          <text x="345" y="60" text-anchor="middle" fill="var(--ink)">significance</text>
+          <text x="345" y="74" text-anchor="middle" fill="var(--muted)" font-size="10.5">S2</text>
+        </g>
+        <g>
+          <rect x="432" y="38" width="106" height="44" rx="9" fill="var(--panel)" stroke="var(--line)"/>
+          <text x="485" y="60" text-anchor="middle" fill="var(--ink)">provenance</text>
+          <text x="485" y="74" text-anchor="middle" fill="var(--muted)" font-size="10.5">S3 · S4 · S5</text>
+        </g>
+        <g>
+          <rect x="572" y="38" width="106" height="44" rx="9" fill="var(--panel)" stroke="var(--line)"/>
+          <text x="625" y="60" text-anchor="middle" fill="var(--ink)">preview</text>
+          <text x="625" y="74" text-anchor="middle" fill="var(--muted)" font-size="10.5">S6 exact bytes</text>
+        </g>
+        <g>
+          <rect x="712" y="38" width="106" height="44" rx="9" fill="var(--accent-soft)" stroke="var(--accent)"/>
+          <text x="765" y="60" text-anchor="middle" fill="var(--accent)" font-weight="640">write</text>
+          <text x="765" y="74" text-anchor="middle" fill="var(--accent)" font-size="10.5">S7 · S8</text>
+        </g>
+        <!-- exits -->
+        <g stroke="var(--stop)" stroke-width="1.4" fill="none" stroke-dasharray="4 3">
+          <line x1="205" y1="82" x2="205" y2="132"/>
+          <line x1="345" y1="82" x2="345" y2="132"/>
+          <line x1="485" y1="82" x2="485" y2="132"/>
+          <line x1="625" y1="82" x2="625" y2="132"/>
+        </g>
+        <g font-size="10.5" fill="var(--stop)" text-anchor="middle">
+          <text x="205" y="148">not a repo</text>
+          <text x="345" y="148">no ADR needed</text>
+          <text x="485" y="148">cancelled —</text>
+          <text x="485" y="160">no evidence</text>
+          <text x="625" y="148">declined</text>
+        </g>
+        <text x="450" y="190" text-anchor="middle" font-size="11.5" fill="var(--muted)">
+          every dashed exit writes zero bytes
+        </text>
+      </g>
+    </svg>
+
+    <div class="panel" style="padding:6px 22px">
+      <div class="stage">
+        <div class="tag">S0</div>
+        <div>
+          <h3>Preflight</h3>
+          <p>Confirms it is inside a git repository and that <code>python3</code> ≥ 3.9 exists. Reads
+            <code>$ARGUMENTS</code> — your optional hint, e.g. <code>/adr we chose Riverpod over Bloc</code> —
+            and treats it as evidence <em>only for what it literally says</em>.</p>
+          <div class="meta">
+            <span class="chip load">loads repository-states.md if unusual</span>
+            <span class="chip exit">exit: not a git repo</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="stage">
+        <div class="tag">S1</div>
+        <div>
+          <h3>Evidence gathering — three sources, all read-only</h3>
+          <p><strong>1. The conversation</strong> you just had — the primary source, and the only place
+            <em>intent</em> can come from. <strong>2. The working tree</strong> — status, diffs, and
+            bounded untracked files. <strong>3. Existing ADRs</strong> — full bodies of any duplicate or
+            conflict candidates, not just the index summary.</p>
+          <p>Never runs <code>git fetch</code>. Never copies raw transcript into the record. Untracked
+            files are read only if they are in scope, under 128&nbsp;KiB, text, not symlinks, and capped
+            at 20 per run.</p>
+          <div class="meta"><span class="chip run">git read-only, hardened</span></div>
+        </div>
+      </div>
+
+      <div class="stage">
+        <div class="tag">S2</div>
+        <div>
+          <h3>Significance test</h3>
+          <p>A decision earns a record only if it selects or rejects a real architectural option
+            <em>and</em> constrains more than one component, sets a rule others must follow, outlives one
+            release, or is expensive to reverse. Renames, formatting, and routine bumps are excluded.</p>
+          <div class="meta">
+            <span class="chip load">loads significance.md</span>
+            <span class="chip exit">"No ADR needed" is a valid end</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="stage">
+        <div class="tag">S3</div>
+        <div>
+          <h3>Provenance classification — the heart of it</h3>
+          <p>Every material claim is tagged with where it came from. Only two of the four classes may
+            support intent. An agent's unacknowledged suggestion is not your decision; an implementation
+            proves <em>what</em> was built, never <em>why</em>.</p>
+          <div class="meta"><span class="chip load">loads provenance.md</span></div>
+        </div>
+      </div>
+
+      <div class="stage">
+        <div class="tag">S4</div>
+        <div>
+          <h3>Gap interview — at most three questions</h3>
+          <p>Asked in one message, only for material gaps the evidence cannot fill. If your answers
+            still don't support a claim, that claim is dropped — or the whole record is cancelled.
+            Ambiguity never becomes architectural law.</p>
+          <div class="meta"><span class="chip exit">cancelled — insufficient evidence</span></div>
+        </div>
+      </div>
+
+      <div class="stage">
+        <div class="tag">S5</div>
+        <div>
+          <h3>Sensitive-data check</h3>
+          <p>Scans the proposed bytes for credentials and customer data. Anything found is redacted, and
+            anything remaining needs its own specific confirmation — separate from the write approval.</p>
+        </div>
+      </div>
+
+      <div class="stage">
+        <div class="tag">S6</div>
+        <div>
+          <h3>The exact-patch preview</h3>
+          <p>The agent runs <code>prepare-record</code>, which produces the <em>final</em> bytes — digest
+            computed, index rendered, approver named. You see exactly what will land. Then one question:
+            <em>"Approve this exact patch for writing?"</em></p>
+          <p>Anything other than yes is not approval. Any change means a new preview.</p>
+          <div class="meta">
+            <span class="chip load">loads madr-format.md</span>
+            <span class="chip run">runs prepare-record</span>
+            <span class="chip exit">declined → nothing written</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="stage">
+        <div class="tag">S7</div>
+        <div>
+          <h3>Apply</h3>
+          <p><code>apply-record</code> takes the approved digest and performs the write transaction in
+            Part 4. It writes documentation only — it cannot stage, commit, push, or fetch.</p>
+          <div class="meta"><span class="chip run">runs apply-record</span><span class="chip load">loads transaction.md on failure</span></div>
+        </div>
+      </div>
+
+      <div class="stage">
+        <div class="tag">S8</div>
+        <div>
+          <h3>Report</h3>
+          <p>Every candidate decision gets exactly one outcome — <code>written</code>,
+            <code>not significant</code>, <code>cancelled</code>, <code>declined</code>, or
+            <code>failed</code> — so a run that quietly did nothing can't hide.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================= -->
+  <section>
+    <p class="eyebrow">Part 2</p>
+    <h2>How the agent loads it</h2>
+    <p class="sub">
+      A skill is not a plugin and not a running process. It is a folder of Markdown and scripts that the
+      agent reads <em>progressively</em> — three tiers, each paid for only when needed.
+    </p>
+
+    <svg viewBox="0 0 900 300" role="img" aria-label="Three tiers of skill loading: metadata always, SKILL.md on activation, references and scripts on demand">
+      <g font-family="ui-sans-serif,system-ui" font-size="13">
+        <!-- tier 1 -->
+        <rect x="20" y="20" width="860" height="66" rx="11" fill="var(--panel)" stroke="var(--line)"/>
+        <text x="42" y="46" fill="var(--ink)" font-weight="640">Tier 1 · always in context</text>
+        <text x="42" y="66" fill="var(--muted)" font-size="12.5">
+          name + description from the frontmatter — about 100 tokens. This is all the agent knows until you invoke it.
+        </text>
+        <text x="858" y="52" text-anchor="end" fill="var(--accent)" font-size="12" font-weight="640">~100 tok</text>
+
+        <!-- tier 2 -->
+        <rect x="20" y="102" width="860" height="66" rx="11" fill="var(--accent-soft)" stroke="var(--accent)"/>
+        <text x="42" y="128" fill="var(--accent)" font-weight="640">Tier 2 · on activation (you typed /adr)</text>
+        <text x="42" y="148" fill="var(--accent)" font-size="12.5">
+          The whole SKILL.md body — the S0–S8 workflow. Kept under 500 lines so activation stays cheap.
+        </text>
+        <text x="858" y="134" text-anchor="end" fill="var(--accent)" font-size="12" font-weight="640">&lt;5k tok</text>
+
+        <!-- tier 3 -->
+        <rect x="20" y="184" width="860" height="96" rx="11" fill="var(--panel)" stroke="var(--line)"/>
+        <text x="42" y="210" fill="var(--ink)" font-weight="640">Tier 3 · on demand, per stage</text>
+        <g font-size="11.5">
+          <rect x="42" y="224" width="150" height="40" rx="7" fill="var(--bg)" stroke="var(--line)"/>
+          <text x="117" y="240" text-anchor="middle" fill="var(--ink)">significance.md</text>
+          <text x="117" y="255" text-anchor="middle" fill="var(--muted)">at S2 only</text>
+
+          <rect x="204" y="224" width="150" height="40" rx="7" fill="var(--bg)" stroke="var(--line)"/>
+          <text x="279" y="240" text-anchor="middle" fill="var(--ink)">provenance.md</text>
+          <text x="279" y="255" text-anchor="middle" fill="var(--muted)">at S3 only</text>
+
+          <rect x="366" y="224" width="150" height="40" rx="7" fill="var(--bg)" stroke="var(--line)"/>
+          <text x="441" y="240" text-anchor="middle" fill="var(--ink)">madr-format.md</text>
+          <text x="441" y="255" text-anchor="middle" fill="var(--muted)">at S6 only</text>
+
+          <rect x="528" y="224" width="150" height="40" rx="7" fill="var(--bg)" stroke="var(--line)"/>
+          <text x="603" y="240" text-anchor="middle" fill="var(--ink)">transaction.md</text>
+          <text x="603" y="255" text-anchor="middle" fill="var(--muted)">on write failure</text>
+
+          <rect x="690" y="224" width="168" height="40" rx="7" fill="var(--bg)" stroke="var(--line)"/>
+          <text x="774" y="240" text-anchor="middle" fill="var(--ink)">scripts/*</text>
+          <text x="774" y="255" text-anchor="middle" fill="var(--muted)">executed, never read</text>
+        </g>
+      </g>
+    </svg>
+
+    <div class="note">
+      <strong>The scripts are never "loaded" in the context sense.</strong> The agent doesn't read
+      <code>apply-record</code> into its context window and reason about it — it <em>runs</em> it as a
+      subprocess and reads the JSON that comes back. That is the whole point: the parts that must be
+      exactly right are code, not prose the model has to remember.
+    </div>
+
+    <h3 style="margin-top:26px">Two things this skill deliberately does not do</h3>
+    <div class="grid2">
+      <div class="panel">
+        <h3>It does not fork</h3>
+        <p class="k">Skills can run in a forked sub-context. This one must not. A forked skill cannot see
+          the conversation whose provenance it exists to capture — it would be reconstructing intent from
+          the code, which is exactly the failure it's built to prevent.</p>
+      </div>
+      <div class="panel">
+        <h3>It does not pre-approve tools</h3>
+        <p class="k">The frontmatter could list <code>allowed-tools</code> to skip permission prompts.
+          It doesn't. Tool permission is not human approval, and conflating the two would quietly
+          dissolve the one gate that matters.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================= -->
+  <section>
+    <p class="eyebrow">Part 3</p>
+    <h2>Where judgment ends and machinery begins</h2>
+    <p class="sub">
+      The split is deliberate. Anything requiring understanding is the model's. Anything requiring
+      exactness is a deterministic script that fails loudly.
+    </p>
+
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Concern</th><th>Owner</th><th>Why</th></tr></thead>
+        <tbody>
+          <tr><td>Was this decision significant?</td><td>model</td><td>Needs to understand what the change means. Verified by labelled fixtures, not asserted.</td></tr>
+          <tr><td>Who said what, and does it support intent?</td><td>model</td><td>Judgment about a conversation. The riskiest part of the product.</td></tr>
+          <tr><td>Which questions to ask</td><td>model</td><td>Requires knowing what's missing.</td></tr>
+          <tr><td>Identity of the record</td><td><code>ids.py</code></td><td>ULIDs must be collision-resistant and sortable with no coordination.</td></tr>
+          <tr><td>Immutability proof</td><td><code>digest.py</code></td><td>A digest must be reproducible byte-for-byte across machines and years.</td></tr>
+          <tr><td>Reading and writing frontmatter</td><td><code>_frontmatter.py</code></td><td>A parser that guesses would corrupt an immutable record.</td></tr>
+          <tr><td>Rendering the index</td><td><code>index.py</code></td><td>Must be byte-identical every run, or preview ≠ apply.</td></tr>
+          <tr><td>Writing to disk safely</td><td><code>apply-record</code></td><td>Locking, journalling, crash recovery — no model should improvise this.</td></tr>
+          <tr><td>Refusing bad records</td><td><code>validate-adr</code></td><td>A backstop that runs before <em>and</em> after every write.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3 style="margin-top:28px">The provenance classes</h3>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Class</th><th>Meaning</th><th>May support intent?</th></tr></thead>
+        <tbody>
+          <tr><td><code>developer-stated</code></td><td>You said it</td><td class="status-ok">yes</td></tr>
+          <tr><td><code>developer-confirmed</code></td><td>You confirmed it when asked</td><td class="status-ok">yes</td></tr>
+          <tr><td><code>code-observed</code></td><td>The diff demonstrates it</td><td class="status-block">no — implementation is not rationale</td></tr>
+          <tr><td><code>[UNCONFIRMED]</code></td><td>The agent inferred it</td><td class="status-block">no — resolve, drop, or cancel</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="k" style="margin-top:12px">
+      The fourth class may never reach disk. The persisted schema physically cannot express it — the
+      validator accepts only the first three.
+    </p>
+  </section>
+
+  <!-- ============================================= -->
+  <section>
+    <p class="eyebrow">Part 4</p>
+    <h2>The write transaction</h2>
+    <p class="sub">
+      Between your "yes" and the file existing, eleven steps run. The awkward truth they're designed
+      around: creating a file and replacing another cannot be made atomic together on a portable
+      filesystem — so instead of pretending, the protocol makes every intermediate state
+      <em>recoverable</em>.
+    </p>
+
+<pre><code> 1  verify root      git rev-parse --show-toplevel → open(O_DIRECTORY|O_NOFOLLOW)
+ 2  resolve targets  component-by-component openat(O_NOFOLLOW) → any symlink ⇒ refuse
+ 3  acquire lock     mkdir(".adr-scribe.lock")  ← atomic; already exists ⇒ staleness check
+ 4  record owner     pid + process start token + timestamp → fsync
+ 5  journal          phase="prepared" + expected sha256 of EVERY output → fsync
+ 6  re-check         preconditions still hold? changed ⇒ stop, nothing written
+ 7  stage            render outputs inside the lock dir (same filesystem) → fsync
+ 7a bootstrap        create docs/ and docs/adr/ if missing → fsync parent
+ 8  create ADRs      linkat(tmp→dest) — atomic and fails if the target exists
+ 9  replace index    re-read + hash-match → save preimage → renameat → fsync
+10  verify           re-read bytes, validate schema, check index membership
+11  complete         journal → rename lock to .adr-scribe-completed-&lt;ULID&gt; → remove</code></pre>
+
+    <div class="note">
+      <strong>Why the journal records hashes before writing anything.</strong> The phase label always
+      lags the operation — there is a window where the file exists but the journal still says
+      "prepared". Recovery therefore identifies state by <em>hash</em>, never by phase: a file whose
+      bytes match the expected hash can only be ours, so it is safe to adopt and continue. A recovery
+      routine that trusted the phase label would be unable to recover the most likely crash windows.
+    </div>
+
+    <div class="note stop">
+      <strong>What it will never do.</strong> Overwrite a file it didn't just create · follow a symlink ·
+      write outside the repository root · execute a command it found in your repo · run
+      <code>git add</code>, <code>commit</code>, <code>push</code>, or <code>fetch</code> · claim success
+      after a failed verification.
+    </div>
+  </section>
+
+  <!-- ============================================= -->
+  <section>
+    <p class="eyebrow">Part 5</p>
+    <h2>The limit worth knowing</h2>
+    <p class="sub">One guarantee is weaker than it looks, and saying so is part of the design.</p>
+    <div class="panel">
+      <p>The same model both renders the preview <em>and</em> calls the writer with the approved digest.
+        The writer can prove its input matches the digest it was handed — but not that a human ever saw
+        those bytes. In principle a model could display one thing and apply another.</p>
+      <p style="margin-bottom:0">So <em>"never writes unapproved bytes"</em> is a <strong>procedural</strong>
+        guarantee under an honest model, not a mechanically enforced one. Closing it properly needs
+        something Claude Code doesn't offer today: an approval receipt issued by the host and bound to
+        the writer's digest. Until then the practical mitigation is unglamorous — the writer echoes the
+        digest and every destination path, and you <code>git diff</code> before committing.</p>
+    </div>
+  </section>
+
+  <!-- ============================================= -->
+  <section>
+    <p class="eyebrow">Part 6</p>
+    <h2>What exists right now</h2>
+    <p class="sub">Built and tested overnight. 165 tests pass on Python 3.9 and 3.14.</p>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Component</th><th>Built by</th><th>Tests</th><th>State</th></tr></thead>
+        <tbody>
+          <tr><td><code>ids.py</code> — ULIDs, slugs, filenames</td><td>Antigravity</td><td>15</td><td class="status-ok">landed</td></tr>
+          <tr><td><code>digest.py</code> — content + patch digests</td><td>Codex</td><td>38</td><td class="status-ok">landed</td></tr>
+          <tr><td><code>_frontmatter.py</code> — canonical parser</td><td>Claude CLI, finished in-session</td><td>81</td><td class="status-ok">landed</td></tr>
+          <tr><td><code>index.py</code> — generated block</td><td>orchestrator</td><td>21</td><td class="status-ok">landed</td></tr>
+          <tr><td>cross-module integration</td><td>orchestrator</td><td>10</td><td class="status-ok">landed</td></tr>
+          <tr><td><code>validate-adr</code>, <code>render-index</code>, <code>prepare-record</code></td><td>—</td><td>—</td><td class="status-todo">next</td></tr>
+          <tr><td><code>apply-record</code> — the transaction</td><td>—</td><td>—</td><td class="status-block">blocked on a decision</td></tr>
+          <tr><td><code>SKILL.md</code> + references</td><td>—</td><td>—</td><td class="status-todo">after the writer</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="note">
+      <strong>The blocking decision.</strong> If the index stays part of the approved patch, the full
+      eleven-step protocol in Part 4 is required. If the index instead becomes a <em>derived</em> file —
+      regenerated on demand rather than approved — then a single atomic file creation does the whole job,
+      and the lock, journal, preimage, phase machine and most of the recovery matrix disappear. That
+      roughly halves the largest remaining milestone, but it changes what the PRD requires, so it is
+      yours to decide.
+    </div>
+
+    <p class="k">
+      Two defects were caught by review that no single implementer could have caught alone: a regex
+      anchor that let a filename contain a newline, and a contract of mine that couldn't represent a real
+      record's list fields. Both are fixed, both have regression tests.
+    </p>
+  </section>
+
+  <footer>
+    <p style="margin:0">
+      adr-scribe · explainer generated 2026-08-12 · reflects
+      <span class="mono">docs/adr-skill-development-plan.md</span> v1.1 and
+      <span class="mono">docs/adr-skill-prd.md</span> v0.2.
+      Nothing has been committed — all work is in the working tree.
+    </p>
+  </footer>
+</div>
+</body>
+</html>
