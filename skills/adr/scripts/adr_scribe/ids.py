@@ -1,7 +1,7 @@
 import re
 import secrets
 import time
-from typing import Optional
+from typing import Optional, Tuple
 
 class IdError(ValueError):
     """Raised when an identifier or slug is invalid or generation fails."""
@@ -13,6 +13,13 @@ CROCKFORD_REVERSE = {c: i for i, c in enumerate(CROCKFORD_ALPHABET)}
 _VALID_ULID_RE = re.compile(r"^[0-7][0-9A-HJKMNP-TV-Z]{25}$")
 _VALID_SLUG_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 _NON_SLUG_CHARS_RE = re.compile(r"[^a-z0-9]+")
+_FILENAME_RE = re.compile(r"(\d{3,})-([a-z0-9]+(?:-[a-z0-9]+)*)\.md")
+
+#: Sequence numbers are display identity only. The stable identity is the
+#: ULID in frontmatter ``id``; it is what digests, supersedes references, and
+#: the journal bind to. Renumbering after a branch merge is therefore a pure
+#: file rename and can never invalidate a content digest.
+MAX_NUMBER = 10 ** 6
 
 _last_timestamp_ms = -1
 _last_random_int = 0
@@ -57,8 +64,8 @@ def is_valid_ulid(value: str) -> bool:
     """Check if the string is a valid ULID.
 
     Uses ``fullmatch``: ``re.match`` with a trailing ``$`` also accepts a
-    trailing newline, which would let ``adr_filename`` build a path containing
-    a newline character.
+    trailing newline, which would let a validated identifier smuggle a newline
+    into a path or document.
     """
     if not isinstance(value, str):
         return False
@@ -106,10 +113,33 @@ def is_valid_slug(value: str) -> bool:
         return False
     return bool(_VALID_SLUG_RE.fullmatch(value))
 
-def adr_filename(ulid: str, slug: str) -> str:
-    """Generate the ADR filename."""
-    if not is_valid_ulid(ulid):
-        raise IdError("Invalid ULID")
+def format_number(number: int) -> str:
+    """Zero-pad a sequence number to at least three digits (001, 002, 1000)."""
+    if not isinstance(number, int) or isinstance(number, bool):
+        raise IdError("Sequence number must be an int")
+    if number < 1 or number > MAX_NUMBER:
+        raise IdError(f"Sequence number out of range: {number}")
+    return "%03d" % number
+
+def adr_filename(number: int, slug: str) -> str:
+    """Generate the ADR filename: ``NNN-<slug>.md``."""
+    prefix = format_number(number)
     if not is_valid_slug(slug):
         raise IdError("Invalid slug")
-    return f"adr-{ulid.lower()}-{slug}.md"
+    return f"{prefix}-{slug}.md"
+
+def parse_filename(name: str) -> Optional[Tuple[int, str]]:
+    """Parse ``NNN-<slug>.md`` into ``(number, slug)``; ``None`` if no match.
+
+    ``fullmatch`` for the same reason as :func:`is_valid_ulid`: a trailing
+    newline must not turn an unrelated string into a record filename.
+    """
+    if not isinstance(name, str):
+        return None
+    match = _FILENAME_RE.fullmatch(name)
+    if match is None:
+        return None
+    number = int(match.group(1))
+    if number < 1 or number > MAX_NUMBER:
+        return None
+    return number, match.group(2)

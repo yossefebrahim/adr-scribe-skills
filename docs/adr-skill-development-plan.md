@@ -311,7 +311,7 @@ description: >-
   Capture a significant architecture decision from the current conversation as a
   provenance-checked ADR. Use when the developer invokes /adr or asks to record an
   ADR, architecture decision, or decision record from work just discussed.
-license: <TBD Q3>
+license: MIT
 compatibility: >-
   Claude Code with Git and python3 3.9+. macOS and Linux. No network access and no
   ripgrep required. Writes only inside the repository, never runs git mutations.
@@ -487,7 +487,7 @@ The two long poles — **M1 (writer)** and **M2/M3 (prompt + evals)** — share 
 |---|---|---|
 | M6.1 | `skills-ref validate ./skills/adr` in CI (`github.com/agentskills/agentskills`) | must pass on every PR |
 | M6.2 | Portability sweep: grep the shipped tree for internal names, absolute paths, team conventions, `rg`/`jq`/network assumptions | zero hits (**D8**, PRD §8) |
-| M6.3 | Resolve **Q3**: final skill name + license. `adr` is not globally unique and **can collide with a local `/adr`**; the CLI installs by directory name, so a collision is the *user's* problem to rename. Recommend keeping `adr` and documenting the rename path; add `LICENSE` (recommend **Apache-2.0** — patent grant, permissive) and set `license:` frontmatter. | decided before publish |
+| M6.3 | **Resolved:** keep the `adr` skill name and use the **MIT License**. `adr` is not globally unique and **can collide with a local `/adr`**; the CLI installs by directory name, so document the rename path before public release. Keep the root and bundled `LICENSE` files aligned with `license: MIT` frontmatter. | decided 2026-08-13 |
 | M6.4 | Resolve **Q6**: support matrix. Recommend macOS 13+ / Linux, git ≥2.30, python ≥3.9; state it in `compatibility` and README. | documented |
 | M6.5 | Fresh-install test in **≥3 unrelated repos**: `npx skills add yossefebrahim/adr-scribe-skills --skill adr -a claude-code`, plus `--list` and the non-interactive `--skill '*' -a claude-code -y` form | 3/3 first-run success |
 | M6.6 | README as the shop window: one-paragraph value prop (session-based capture with provenance discipline — the differentiator per PRD Risk 11), install command, a real before/after example, explicit **non-goals**, safety statement ("never stages, commits, pushes, or fetches; writes only after you approve exact bytes"), uninstall/disable, recovery runbook, issue-reporting path | reviewed |

@@ -19,7 +19,7 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 from . import _frontmatter as fm
 from . import digest as _digest
-from .ids import adr_filename, new_ulid, slugify
+from .ids import adr_filename, format_number, new_ulid, slugify
 from .validate import (
     PROVENANCE_CLASSES,
     PROVENANCE_FIELDS,
@@ -254,27 +254,35 @@ def build_frontmatter(record: Mapping[str, Any], record_id: str,
 
 
 class BuiltRecord(object):
-    """A rendered ADR: its id, filename, final bytes, and row for the index."""
+    """A rendered ADR: its id, number, filename, final bytes, and index row."""
 
-    __slots__ = ("ulid", "record_id", "filename", "content", "frontmatter")
+    __slots__ = ("ulid", "record_id", "number", "filename", "content",
+                 "frontmatter")
 
-    def __init__(self, ulid, record_id, filename, content, frontmatter):
+    def __init__(self, ulid, record_id, number, filename, content, frontmatter):
         self.ulid = ulid
         self.record_id = record_id
+        self.number = number
         self.filename = filename
         self.content = content
         self.frontmatter = frontmatter
 
     def index_row(self) -> Dict[str, str]:
-        return {k: self.frontmatter[k]
-                for k in ("id", "title", "status", "date", "summary")}
+        row = {k: self.frontmatter[k]
+               for k in ("id", "title", "status", "date", "summary")}
+        row["number"] = format_number(self.number)
+        return row
 
 
 def build(record: Mapping[str, Any], today: str,
-          ulid: Optional[str] = None) -> BuiltRecord:
+          ulid: Optional[str] = None, number: int = 1) -> BuiltRecord:
     """Render a complete ADR document, digest included.
 
     ``ulid`` may be supplied for deterministic tests; otherwise one is minted.
+    ``number`` is the display sequence allocated by the caller from the
+    records already on disk. It appears only in the filename and the index --
+    the document bytes bind to the ULID, so a later renumber cannot break the
+    content digest.
     """
     if not isinstance(record, Mapping):
         raise RecordError("record must be a mapping")
@@ -288,5 +296,5 @@ def build(record: Mapping[str, Any], today: str,
     front["content-digest"] = _digest.content_digest(front, body)
 
     content = ("---\n" + fm.emit(front) + "---\n").encode("utf-8") + body
-    filename = adr_filename(ulid, slugify(front["title"]))
-    return BuiltRecord(ulid, record_id, filename, content, front)
+    filename = adr_filename(number, slugify(front["title"]))
+    return BuiltRecord(ulid, record_id, number, filename, content, front)

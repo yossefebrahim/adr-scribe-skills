@@ -4,7 +4,7 @@ description: >-
   Capture a significant architecture decision from the current conversation as a
   provenance-checked ADR. Use when the developer invokes /adr or asks to record an
   ADR, architecture decision, or decision record from work just discussed.
-license: Apache-2.0
+license: MIT
 compatibility: >-
   Claude Code with Git and python3 3.9+. macOS and Linux. No network access and no
   ripgrep required. Writes only inside the repository, and never runs git mutations.

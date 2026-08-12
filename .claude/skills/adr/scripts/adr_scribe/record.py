@@ -20,7 +20,11 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence
 from . import _frontmatter as fm
 from . import digest as _digest
 from .ids import adr_filename, new_ulid, slugify
-from .validate import PROVENANCE_CLASSES, PROVENANCE_FIELDS
+from .validate import (
+    PROVENANCE_CLASSES,
+    PROVENANCE_FIELDS,
+    check_command_safety,
+)
 
 SCHEMA = "adr-scribe/v1"
 
@@ -146,7 +150,24 @@ def render_body(record: Mapping[str, Any], record_id: str) -> str:
     else:
         out.append("- Manual: review the implementation against this record.")
     for command in commands:
-        out.append("- Optional read-only check: `%s`" % _clean(command, "confirmation command"))
+        command = _clean(command, "confirmation command")
+        # Validate the command *here*, before it is embedded in Markdown.
+        #
+        # Checking only after rendering is not enough: a command containing a
+        # backtick breaks out of its own inline code span, so re-extracting it
+        # from the rendered document yields a different (shorter, harmless)
+        # string than the one actually written. `ls `rm -rf /`` re-extracts as
+        # `ls`, which passes every check while the destructive text lands in
+        # the record. Validating the source string closes that gap; rejecting
+        # backticks outright closes it permanently, since no safe read-only
+        # command needs one.
+        if "`" in command:
+            raise RecordError(
+                "confirmation command must not contain a backtick: %r" % command)
+        problem = check_command_safety(command)
+        if problem:
+            raise RecordError("unsafe confirmation command %r: %s" % (command, problem))
+        out.append("- Optional read-only check: `%s`" % command)
     out.append("")
 
     out.append("## Pros and Cons of the Options")
