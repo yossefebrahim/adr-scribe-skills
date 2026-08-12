@@ -95,7 +95,11 @@ def main(argv=None):
 
     # Cheap preconditions first: an uncommitted edit to a target must be
     # reported as such, not masked by a later rendering error on the same file.
-    dirty = gitcmd.is_dirty_paths(repo, [adr_rel, INDEX_REL])
+    try:
+        dirty = gitcmd.is_dirty_paths(repo, [adr_rel, INDEX_REL])
+    except gitcmd.GitError as exc:
+        sys.stderr.write("prepare-record: cannot inspect repository: %s\n" % exc)
+        return 5
     if dirty:
         sys.stderr.write("prepare-record: refusing -- uncommitted changes overlap "
                          "the targets: %s\n" % ", ".join(dirty))
@@ -134,10 +138,16 @@ def main(argv=None):
             ops.append({"op": "create-dir", "path": missing})
     ops.sort(key=lambda o: o["path"].encode("utf-8"))
 
+    try:
+        head = gitcmd.head_commit(repo)
+    except gitcmd.GitError as exc:
+        sys.stderr.write("prepare-record: cannot inspect repository: %s\n" % exc)
+        return 5
+
     patch = {
         "patch-version": 1,
         "repo-relative-ops": ops,
-        "preconditions": {"head": gitcmd.head_commit(repo), "dirty-overlap": []},
+        "preconditions": {"head": head, "dirty-overlap": []},
     }
     try:
         patch_digest = D.patch_digest(patch)

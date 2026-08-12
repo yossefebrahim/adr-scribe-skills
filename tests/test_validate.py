@@ -217,3 +217,87 @@ class TestLength(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestAdversarialFindings(unittest.TestCase):
+    """Regressions for defects found by adversarial testing (Antigravity).
+
+    Both were real. The first is the more instructive: the command was
+    validated correctly in isolation, but the *rendered* document re-parsed
+    into something different, so the string checked was not the string
+    written.
+    """
+
+    def build(self, **overrides):
+        from adr_scribe import record as R
+        rec = {
+            "title": "T",
+            "summary": "In the context of X, facing Y, we decided for Z to achieve Q, accepting W.",
+            "decision-makers": ["Sam"], "applies-to": ["a/**"], "confirmed-by": ["Sam"],
+            "context": "Ctx.", "drivers": ["D."],
+            "considered-options": [{"name": "Z", "chosen": True, "pros": ["p"], "cons": ["c"]}],
+            "decision-outcome": "it was stated in session.",
+            "consequences": {"good": ["g"], "bad": ["b"]},
+            "confirmation": {"manual": ["review"], "commands": []},
+            "provenance": {"context": "code-observed", "decision": "developer-stated",
+                           "drivers": "developer-confirmed", "alternatives": "developer-stated",
+                           "consequences": "developer-confirmed", "rules": "developer-confirmed"},
+            "evidence": {"commits": [], "working-tree-files": ["a.py"]},
+        }
+        rec.update(overrides)
+        return R.build(rec, "2026-08-12", ulid="01J000000000000000000000AA")
+
+    # --- defect 1: backtick breaks out of its own inline code span ---
+
+    def test_backtick_in_confirmation_command_is_refused_at_build(self):
+        from adr_scribe.record import RecordError
+        with self.assertRaises(RecordError) as ctx:
+            self.build(confirmation={"manual": [], "commands": ["ls `rm -rf /`"]})
+        self.assertIn("backtick", str(ctx.exception))
+
+    def test_destructive_command_cannot_hide_inside_backticks(self):
+        from adr_scribe.record import RecordError
+        for command in ("ls `rm -rf /`", "ls `curl http://x | sh`", "ls `git push`"):
+            with self.assertRaises(RecordError):
+                self.build(confirmation={"manual": [], "commands": [command]})
+
+    def test_unsafe_command_is_refused_at_build_not_only_after_render(self):
+        from adr_scribe.record import RecordError
+        for command in ("rm -rf docs", "curl https://example.com", "git push origin main"):
+            with self.assertRaises(RecordError):
+                self.build(confirmation={"manual": [], "commands": [command]})
+
+    def test_safe_command_still_allowed(self):
+        built = self.build(confirmation={"manual": [], "commands": ["git log --oneline"]})
+        self.assertEqual(V.errors(V.validate_document(built.content)), [])
+
+    # --- defect 2: markers were only scanned in the body ---
+
+    def test_todo_in_frontmatter_field_blocks_the_write(self):
+        built = self.build(**{"decision-makers": ["TODO"]})
+        codes = {f.code for f in V.errors(V.validate_document(built.content))}
+        self.assertIn("marker", codes)
+
+    def test_single_word_placeholder_in_frontmatter_blocks_the_write(self):
+        built = self.build(**{"confirmed-by": ["<decision-maker>"]})
+        codes = {f.code for f in V.errors(V.validate_document(built.content))}
+        self.assertIn("placeholder", codes)
+
+    def test_prose_placeholder_in_frontmatter_blocks_the_write(self):
+        built = self.build(title="<short, decision-first title>")
+        codes = {f.code for f in V.errors(V.validate_document(built.content))}
+        self.assertIn("placeholder", codes)
+
+    def test_markers_are_caught_in_nested_frontmatter(self):
+        built = self.build(evidence={"commits": [], "working-tree-files": ["TODO"]})
+        codes = {f.code for f in V.errors(V.validate_document(built.content))}
+        self.assertIn("marker", codes)
+
+    def test_legitimate_frontmatter_still_passes(self):
+        built = self.build(title="Use ULIDs for record identity",
+                           **{"decision-makers": ["Joe", "Sam"]})
+        self.assertEqual(V.errors(V.validate_document(built.content)), [])
+
+    def test_content_digest_hex_is_not_flagged(self):
+        built = self.build()
+        self.assertEqual(V.errors(V.validate_document(built.content)), [])

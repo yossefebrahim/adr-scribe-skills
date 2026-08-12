@@ -14,8 +14,8 @@ jobs:
         python: ["3.9", "3.12", "3.13"]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python }}
       - name: Test
@@ -26,8 +26,8 @@ jobs:
     # prove it rather than asserting it.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with: { python-version: "3.12" }
       - name: Remove rg and jq from PATH
         run: |
@@ -38,7 +38,7 @@ jobs:
     # A grep is cheap insurance against a mutating git verb ever appearing.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Assert no mutating git verbs in shipped code
         run: |
           if grep -rnE '"(add|commit|push|fetch|pull|clone|checkout|reset)"' \
@@ -54,8 +54,8 @@ jobs:
   skill-validates:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with: { python-version: "3.12" }
       - name: Frontmatter conforms to the Agent Skills spec
         run: make check-skill

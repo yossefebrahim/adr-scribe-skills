@@ -67,6 +67,14 @@ Allowed command heads: `rg grep ls cat head tail find wc diff test python python
 pytest make git node npm go cargo`, with git limited to `log diff status show
 rev-parse ls-files grep blame`. No pipes, redirects, `;`, `&&`, `$( )`, or backticks.
 
+Commands are validated **before** they are rendered into Markdown, not only by
+re-reading the finished document. Adversarial testing found why that matters: a
+backtick inside a command breaks out of its own inline code span, so re-extracting it
+from the rendered record yields a shorter, harmless string —
+`` `ls `rm -rf /`` `` re-extracts as `ls`. The dangerous text passed every check and
+still landed in the file. Validating the source string closes that gap, and backticks
+are now rejected outright, since no read-only command needs one.
+
 **More Information** is for links and evidence limitations. Never paste transcripts.
 
 ## Length

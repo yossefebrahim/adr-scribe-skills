@@ -44,16 +44,8 @@ RECORD = {
     "evidence": {"commits": [], "working-tree-files": ["skills/adr/scripts/adr_scribe/ids.py"]},
 }
 
-
-def run_script(name, args, env=None, cwd=None):
-    full = dict(os.environ)
-    full["PYTHONPATH"] = SCRIPTS
-    if env:
-        full.update(env)
-    proc = subprocess.run([sys.executable, os.path.join(SCRIPTS, name)] + args,
-                          stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                          env=full, cwd=cwd)
-    return proc.returncode, proc.stdout.decode(), proc.stderr.decode()
+TEST_ULID = "01J000000000000000000000AA"
+SECOND_TEST_ULID = "01J000000000000000000000AB"
 
 
 class Base(unittest.TestCase):
@@ -73,30 +65,57 @@ class Base(unittest.TestCase):
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def git(self, *args):
-        return subprocess.run(["git", "-C", self.repo] + list(args),
+        proc = subprocess.run(["git", "-C", self.repo] + list(args),
                               stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertEqual(
+            proc.returncode, 0,
+            "git %s exited %s\nstdout:\n%s\nstderr:\n%s" %
+            (" ".join(args), proc.returncode,
+             proc.stdout.decode("utf-8", "replace"),
+             proc.stderr.decode("utf-8", "replace")))
+        return proc
 
-    def prepare(self, stage=None, extra=None):
+    def run_script(self, name, args, expected=0, env=None, cwd=None):
+        full = dict(os.environ)
+        full["PYTHONPATH"] = SCRIPTS
+        if env:
+            full.update(env)
+        proc = subprocess.run(
+            [sys.executable, os.path.join(SCRIPTS, name)] + args,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=full, cwd=cwd)
+        result = (proc.returncode,
+                  proc.stdout.decode("utf-8", "replace"),
+                  proc.stderr.decode("utf-8", "replace"))
+        code, out, err = result
+        expected_codes = expected if isinstance(expected, tuple) else (expected,)
+        self.assertIn(
+            code, expected_codes,
+            "%s exited %s (expected %s)\nstdout:\n%s\nstderr:\n%s" %
+            (name, code, ", ".join(str(value) for value in expected_codes),
+             out, err))
+        return result
+
+    def prepare(self, stage=None, extra=None, expected=0, env=None):
         stage = stage or self.stage
         args = ["--repo", self.repo, "--input", self.record_path, "--out", stage,
-                "--today", "2026-08-12"]
+                "--today", "2026-08-12", "--ulid", TEST_ULID]
         if extra:
             args.extend(extra)
-        return run_script("prepare-record", args)
+        return self.run_script("prepare-record", args, expected=expected, env=env)
 
     def bundle(self, stage=None):
         stage = stage or self.stage
         with open(os.path.join(stage, "patch.json")) as fh:
             return json.load(fh)
 
-    def apply(self, stage=None, digest=None, env=None, extra=None):
+    def apply(self, stage=None, digest=None, env=None, extra=None, expected=0):
         stage = stage or self.stage
         bundle = self.bundle(stage)
         args = ["--patch", os.path.join(stage, "patch.json"),
                 "--approved-digest", digest or bundle["patch-digest"], "--json"]
         if extra:
             args.extend(extra)
-        return run_script("apply-record", args, env=env)
+        return self.run_script("apply-record", args, expected=expected, env=env)
 
     def adr_files(self):
         directory = os.path.join(self.repo, "docs", "adr")
@@ -153,9 +172,9 @@ class TestHappyPath(Base):
     def test_written_record_validates_and_index_lists_it_once(self):
         self.prepare()
         self.apply()
-        code, out, _ = run_script("validate-adr", ["--repo", self.repo, "--all"])
+        code, out, _ = self.run_script("validate-adr", ["--repo", self.repo, "--all"])
         self.assertEqual(code, 0, out)
-        code, _, err = run_script("render-index", ["--repo", self.repo, "--check"])
+        code, _, err = self.run_script("render-index", ["--repo", self.repo, "--check"])
         self.assertEqual(code, 0, err)
 
     def test_lock_is_released_after_success(self):
@@ -176,7 +195,8 @@ class TestRefusals(Base):
 
     def test_wrong_approved_digest_is_refused(self):
         self.prepare()
-        code, _, err = self.apply(digest="sha256:" + "0" * 64)
+        code, _, err = self.apply(digest="sha256:" + "0" * 64,
+                                  expected=T.E_REFUSED)
         self.assertEqual(code, T.E_REFUSED)
         self.assertIn("approval is void", err)
         self.assertEqual(self.adr_files(), [])
@@ -189,7 +209,7 @@ class TestRefusals(Base):
         os.makedirs(os.path.join(self.repo, "docs", "adr"), exist_ok=True)
         with open(os.path.join(self.repo, adr_rel), "w") as fh:
             fh.write("squatter")
-        code, _, err = self.apply()
+        code, _, err = self.apply(expected=T.E_PRECONDITION)
         self.assertEqual(code, T.E_PRECONDITION)
         with open(os.path.join(self.repo, adr_rel)) as fh:
             self.assertEqual(fh.read(), "squatter")
@@ -200,7 +220,7 @@ class TestRefusals(Base):
         os.makedirs(os.path.join(self.repo, "docs"))
         os.symlink(outside, os.path.join(self.repo, "docs", "adr"))
         self.prepare()
-        code, _, err = self.apply()
+        code, _, err = self.apply(expected=T.E_REFUSED)
         self.assertEqual(code, T.E_REFUSED)
         self.assertIn("symlink", err)
         self.assertEqual(os.listdir(outside), [])
@@ -213,25 +233,36 @@ class TestRefusals(Base):
         self.git("commit", "-qm", "add index")
         with open(os.path.join(self.repo, "docs/adr/README.md"), "a") as fh:
             fh.write("uncommitted edit\n")
-        code, _, err = self.prepare()
+        code, _, err = self.prepare(expected=1)
         self.assertNotEqual(code, 0)
         self.assertIn("uncommitted", err.lower())
 
     def test_rs19_outside_a_git_repo(self):
         plain = os.path.join(self.tmp, "plain")
         os.makedirs(plain)
-        code, _, err = run_script("prepare-record",
-                                  ["--repo", plain, "--input", self.record_path,
-                                   "--out", os.path.join(self.tmp, "s2"),
-                                   "--today", "2026-08-12"])
+        code, _, err = self.run_script(
+            "prepare-record",
+            ["--repo", plain, "--input", self.record_path,
+             "--out", os.path.join(self.tmp, "s2"),
+             "--today", "2026-08-12", "--ulid", TEST_ULID],
+            expected=(0, 1, 5))
         # No git repo: HEAD resolves to "unborn" and the write is still safe,
         # but the skill's S0 preflight is what refuses. Assert we do not crash.
         self.assertIn(code, (0, 1, 5))
 
     def test_stage_inside_the_repo_is_refused(self):
-        code, _, err = self.prepare(stage=os.path.join(self.repo, "stage"))
+        code, _, err = self.prepare(stage=os.path.join(self.repo, "stage"),
+                                    expected=2)
         self.assertEqual(code, 2)
         self.assertIn("outside the repository", err)
+
+    def test_git_error_is_reported_without_a_traceback(self):
+        code, _, err = self.prepare(env={"PATH": ""}, expected=5)
+        self.assertEqual(code, 5)
+        self.assertIn("cannot inspect repository", err)
+        self.assertIn("git is not installed", err)
+        self.assertNotIn("Traceback", err)
+        self.assertFalse(os.path.exists(os.path.join(self.stage, "patch.json")))
 
 
 class TestConcurrency(Base):
@@ -242,7 +273,7 @@ class TestConcurrency(Base):
             json.dump({"pid": os.getpid(),
                        "start-token": J.process_start_token(os.getpid()),
                        "host": "test", "timestamp": __import__("time").time()}, fh)
-        code, _, err = self.apply()
+        code, _, err = self.apply(expected=T.E_LOCKED)
         self.assertEqual(code, T.E_LOCKED)
         self.assertEqual(self.adr_files(), [])
 
@@ -251,7 +282,7 @@ class TestConcurrency(Base):
         os.makedirs(os.path.join(self.repo, J.LOCK_DIRNAME))
         with open(os.path.join(self.repo, J.LOCK_DIRNAME, J.OWNER_FILE), "w") as fh:
             fh.write("{ not json")
-        code, _, err = self.apply()
+        code, _, err = self.apply(expected=T.E_CONFIRM)
         self.assertEqual(code, T.E_CONFIRM)
         self.assertIn("force-reclaim", err)
 
@@ -270,12 +301,14 @@ class TestConcurrency(Base):
 class TestCrashRecovery(Base):
     def crash_at(self, point):
         self.prepare()
-        code, _, _ = self.apply(env={"ADR_SCRIBE_CRASH_AT": point})
+        code, _, _ = self.apply(env={"ADR_SCRIBE_CRASH_AT": point}, expected=70)
         self.assertEqual(code, 70, "expected the injected crash at %s" % point)
 
-    def recover(self, extra=None):
-        return run_script("apply-record",
-                          ["--repo", self.repo, "--recover", "--json"] + (extra or []))
+    def recover(self, extra=None, expected=0):
+        return self.run_script(
+            "apply-record",
+            ["--repo", self.repo, "--recover", "--json"] + (extra or []),
+            expected=expected)
 
     def test_rs12b_crash_between_link_and_journal_is_recoverable(self):
         self.crash_at("links-done-prejournal")
@@ -295,14 +328,16 @@ class TestCrashRecovery(Base):
         self.crash_at("index-renamed-prejournal")
         code, out, err = self.recover()
         self.assertEqual(code, 0, err)
-        code, _, err = run_script("render-index", ["--repo", self.repo, "--check"])
+        code, _, err = self.run_script("render-index",
+                                       ["--repo", self.repo, "--check"])
         self.assertEqual(code, 0, err)
 
     def test_rs13_crash_after_index_replaced_is_recoverable(self):
         self.crash_at("phase-index-replaced")
         code, out, err = self.recover()
         self.assertEqual(code, 0, err)
-        code, _, _ = run_script("validate-adr", ["--repo", self.repo, "--all"])
+        code, _, _ = self.run_script("validate-adr",
+                                     ["--repo", self.repo, "--all"])
         self.assertEqual(code, 0)
 
     def test_rs14_interrupted_completed_cleanup_is_idempotent(self):
@@ -322,7 +357,7 @@ class TestCrashRecovery(Base):
         target = os.path.join(self.repo, "docs", "adr", self.adr_files()[0])
         with open(target, "a") as fh:
             fh.write("\nsomeone else edited this\n")
-        code, _, err = self.recover()
+        code, _, err = self.recover(expected=T.E_AFTER_WRITE)
         self.assertEqual(code, T.E_AFTER_WRITE)
         self.assertIn("changed outside this transaction", err)
 
@@ -349,7 +384,7 @@ class TestVerification(Base):
         staged = os.path.join(bundle["payload-dir"], adr_rel.replace("/", "__"))
         with open(staged, "ab") as fh:
             fh.write(b"\ntampered\n")
-        code, _, err = self.apply()
+        code, _, err = self.apply(expected=T.E_REFUSED)
         self.assertEqual(code, T.E_REFUSED)
         self.assertIn("does not match its patch hash", err)
         self.assertEqual(self.adr_files(), [])
@@ -363,14 +398,17 @@ class TestVerification(Base):
         path2 = os.path.join(self.tmp, "record2.json")
         with open(path2, "w") as fh:
             json.dump(record2, fh)
-        code, _, err = run_script("prepare-record",
-                                  ["--repo", self.repo, "--input", path2,
-                                   "--out", stage2, "--today", "2026-08-12"])
+        code, _, err = self.run_script(
+            "prepare-record",
+            ["--repo", self.repo, "--input", path2,
+             "--out", stage2, "--today", "2026-08-12",
+             "--ulid", SECOND_TEST_ULID])
         self.assertEqual(code, 0, err)
         code, _, err = self.apply(stage=stage2)
         self.assertEqual(code, 0, err)
         self.assertEqual(len(self.adr_files()), 2)
-        code, _, err = run_script("render-index", ["--repo", self.repo, "--check"])
+        code, _, err = self.run_script("render-index",
+                                       ["--repo", self.repo, "--check"])
         self.assertEqual(code, 0, err)
         with open(os.path.join(self.repo, "docs/adr/README.md")) as fh:
             self.assertEqual(fh.read().count("| ADR-"), 2)

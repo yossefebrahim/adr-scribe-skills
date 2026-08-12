@@ -227,8 +227,55 @@ def _check_str_list(out: List[Finding], value: Any, field: str, allow_empty: boo
             return
 
 
+def _walk_strings(value: Any, path: str = "") -> List[Tuple[str, str]]:
+    """Yield every (dotted-path, string) pair inside a frontmatter value."""
+    found: List[Tuple[str, str]] = []
+    if isinstance(value, str):
+        found.append((path, value))
+    elif isinstance(value, Mapping):
+        for key, item in value.items():
+            found.extend(_walk_strings(item, "%s.%s" % (path, key) if path else str(key)))
+    elif isinstance(value, (list, tuple)):
+        for i, item in enumerate(value):
+            found.extend(_walk_strings(item, "%s[%d]" % (path, i)))
+    return found
+
+
+def check_frontmatter_markers(fm: Mapping[str, Any]) -> List[Finding]:
+    """Reject unfinished-draft text in frontmatter, not just in the body.
+
+    The body check alone leaves a hole: `decision-makers`, `confirmed-by`,
+    `title` and friends are never rendered into the body, so a record naming
+    "TODO" as its decision-maker, or carrying an unfilled `<decision-maker>`
+    placeholder, would land looking complete.
+    """
+    out: List[Finding] = []
+    for path, text in _walk_strings(fm):
+        if path == "content-digest":
+            continue
+        for marker in FORBIDDEN_MARKERS:
+            if marker in text:
+                _err(out, "marker",
+                     "frontmatter %s contains the unfinished-draft marker %r"
+                     % (path, marker))
+        placeholder = _PLACEHOLDER_RE.search(text)
+        if placeholder:
+            _err(out, "placeholder",
+                 "frontmatter %s contains an unfilled placeholder: %r"
+                 % (path, placeholder.group(0)))
+        elif text.startswith("<") and text.endswith(">") and len(text) > 2:
+            # Single-word placeholders such as `<decision-maker>` carry no
+            # space, so the prose regex misses them. In a frontmatter value --
+            # a name, a title, an approver -- a whole string wrapped in angle
+            # brackets is never legitimate content.
+            _err(out, "placeholder",
+                 "frontmatter %s is an unfilled placeholder: %r" % (path, text))
+    return out
+
+
 def validate_frontmatter(fm: Mapping[str, Any]) -> List[Finding]:
     out: List[Finding] = []
+    out.extend(check_frontmatter_markers(fm))
 
     missing = [k for k in REQUIRED_KEYS if k not in fm]
     if missing:
