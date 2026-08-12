@@ -12,7 +12,7 @@ import unittest
 
 from adr_scribe import _frontmatter as fm
 from adr_scribe import digest, index
-from adr_scribe.ids import adr_filename, new_ulid, slugify
+from adr_scribe.ids import adr_filename, new_ulid, parse_filename, slugify
 
 
 def make_record():
@@ -123,18 +123,20 @@ class TestImmutabilityContract(unittest.TestCase):
 
 class TestIdsToIndex(unittest.TestCase):
     def test_generated_filename_is_safe(self):
-        ulid, rec = make_record()
-        name = adr_filename(ulid, slugify(rec["title"]))
-        self.assertTrue(name.startswith("adr-" + ulid.lower() + "-"))
+        _, rec = make_record()
+        name = adr_filename(7, slugify(rec["title"]))
+        self.assertTrue(name.startswith("007-"))
         self.assertTrue(name.endswith(".md"))
         self.assertFalse(any(ord(c) < 0x20 for c in name))
         self.assertNotIn("/", name)
         self.assertNotIn("..", name)
+        self.assertEqual(parse_filename(name), (7, slugify(rec["title"])))
 
     def test_parsed_record_renders_into_the_index(self):
         _, rec = make_record()
         parsed = fm.parse(fm.emit(rec))
         row = {k: parsed[k] for k in ("id", "title", "status", "date", "summary")}
+        row["number"] = "001"
         out = index.render_index(None, [row])
         self.assertIn(rec["title"], out)
         self.assertIn(rec["id"], out)
@@ -144,11 +146,12 @@ class TestIdsToIndex(unittest.TestCase):
         rec["title"] = "Pipes | and \\ backslashes"
         parsed = fm.parse(fm.emit(rec))
         row = {k: parsed[k] for k in ("id", "title", "status", "date", "summary")}
+        row["number"] = "001"
         body = index.render_table([row]).splitlines()[-1]
         unescaped = sum(
             1 for i, ch in enumerate(body) if ch == "|" and (i == 0 or body[i - 1] != "\\")
         )
-        self.assertEqual(unescaped, 6, body)
+        self.assertEqual(unescaped, 7, body)
 
 
 if __name__ == "__main__":

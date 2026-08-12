@@ -18,20 +18,30 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+from adr_scribe import ids  # noqa: E402
 from adr_scribe import validate as V  # noqa: E402
 
 ADR_DIR = os.path.join("docs", "adr")
 
 
 def collect(repo):
+    """Return ([(path, number)], [legacy paths]) for <repo>/docs/adr.
+
+    Legacy paths are records still named ``adr-<ulid>-<slug>.md`` from before
+    the sequential-filename scheme; they validate but are reported as errors
+    until renamed, because the index renderer no longer sees them.
+    """
     directory = os.path.join(repo, ADR_DIR)
+    found, legacy = [], []
     if not os.path.isdir(directory):
-        return []
-    found = []
+        return found, legacy
     for name in sorted(os.listdir(directory)):
-        if name.startswith("adr-") and name.endswith(".md"):
-            found.append(os.path.join(directory, name))
-    return found
+        parsed = ids.parse_filename(name)
+        if parsed is not None:
+            found.append((os.path.join(directory, name), parsed[0]))
+        elif name.startswith("adr-") and name.endswith(".md"):
+            legacy.append(os.path.join(directory, name))
+    return found, legacy
 
 
 def main(argv=None):
@@ -43,13 +53,17 @@ def main(argv=None):
     parser.add_argument("--json", action="store_true", help="emit a JSON report")
     args = parser.parse_args(argv)
 
+    numbers = {}
+    legacy = []
     if args.all:
         if not args.repo:
             parser.error("--all requires --repo")
-        targets = collect(args.repo)
+        pairs, legacy = collect(args.repo)
+        targets = [path for path, _number in pairs]
+        numbers = dict(pairs)
     else:
-        targets = args.files
-    if not targets:
+        targets = list(args.files)
+    if not targets and not legacy:
         if args.json:
             json.dump({"files": [], "errors": 0, "warnings": 0}, sys.stdout)
             sys.stdout.write("\n")
@@ -60,6 +74,7 @@ def main(argv=None):
     report = []
     total_errors = total_warnings = 0
     seen_ids = {}
+    seen_numbers = {}
 
     for path in targets:
         try:
@@ -82,12 +97,32 @@ def main(argv=None):
                         "id %s already used by %s" % (rid, seen_ids[rid])))
                 else:
                     seen_ids[rid] = path
+            # duplicate sequence numbers are a branch-merge artifact: the
+            # renderer shows them deterministically; refusing them is our job.
+            number = numbers.get(path)
+            if number is not None:
+                if number in seen_numbers:
+                    findings.append(V.Finding(
+                        "error", "duplicate-number",
+                        "sequence number %03d already used by %s; rename one "
+                        "file to the next free number and regenerate the index"
+                        % (number, seen_numbers[number])))
+                else:
+                    seen_numbers[number] = path
 
         errs, warns = V.summarize(findings)
         total_errors += errs
         total_warnings += warns
         report.append({"path": path,
                        "findings": [f.as_dict() for f in findings]})
+
+    for path in legacy:
+        finding = V.Finding(
+            "error", "legacy-filename",
+            "record uses the pre-sequential ULID filename scheme; rename it "
+            "to NNN-<slug>.md so the index includes it")
+        total_errors += 1
+        report.append({"path": path, "findings": [finding.as_dict()]})
 
     if args.json:
         json.dump({"files": report, "errors": total_errors,

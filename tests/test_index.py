@@ -23,8 +23,10 @@ U2 = "ADR-01J000000000000000000000BB"
 U3 = "ADR-01J000000000000000000000CC"
 
 
-def rec(ulid, title="T", status="proposed", date="2026-08-12", summary="S"):
-    return {"id": ulid, "title": title, "status": status, "date": date, "summary": summary}
+def rec(ulid, number="001", title="T", status="proposed", date="2026-08-12",
+        summary="S"):
+    return {"number": number, "id": ulid, "title": title, "status": status,
+            "date": date, "summary": summary}
 
 
 class TestEscapeCell(unittest.TestCase):
@@ -61,14 +63,29 @@ class TestEscapeCell(unittest.TestCase):
 
 
 class TestRenderTable(unittest.TestCase):
-    def test_sorted_by_ulid_regardless_of_input_order(self):
-        records = [rec(U3), rec(U1), rec(U2)]
+    def test_sorted_by_number_regardless_of_input_order(self):
+        records = [rec(U3, "003"), rec(U1, "001"), rec(U2, "002")]
         table = render_table(records)
         self.assertLess(table.index(U1), table.index(U2))
         self.assertLess(table.index(U2), table.index(U3))
 
+    def test_number_sorts_numerically_not_lexically(self):
+        # "010" < "002" lexically would be wrong; 2 < 10 numerically is right.
+        records = [rec(U1, "010"), rec(U2, "002")]
+        table = render_table(records)
+        self.assertLess(table.index(U2), table.index(U1))
+
+    def test_duplicate_numbers_render_deterministically(self):
+        # A branch merge can produce two records with the same number. The
+        # renderer must still show that state (ULID tiebreak); refusing it is
+        # validate-adr's job, not the renderer's.
+        records = [rec(U2, "004"), rec(U1, "004")]
+        table = render_table(records)
+        self.assertLess(table.index(U1), table.index(U2))
+        self.assertEqual(render_table(records), render_table(records[::-1]))
+
     def test_deterministic_across_shuffles(self):
-        records = [rec(U1), rec(U2), rec(U3)]
+        records = [rec(U1, "001"), rec(U2, "002"), rec(U3, "003")]
         expected = render_table(records)
         rng = random.Random(1234)
         for _ in range(50):
@@ -78,17 +95,27 @@ class TestRenderTable(unittest.TestCase):
 
     def test_header_present_with_no_records(self):
         table = render_table([])
-        self.assertIn("| ID | Title | Status | Last updated | Summary |", table)
+        self.assertIn("| # | ID | Title | Status | Last updated | Summary |", table)
         self.assertEqual(len(table.splitlines()), 2)
 
     def test_duplicate_id_rejected(self):
+        # Even with distinct numbers: identity is the ULID, not the ordinal.
         with self.assertRaises(IndexRenderError):
-            render_table([rec(U1), rec(U1)])
+            render_table([rec(U1, "001"), rec(U1, "002")])
 
     def test_malformed_id_rejected(self):
         for bad in ("ADR-nope", "01J0000000000000000000AA", "ADR-81J0000000000000000000A", ""):
             with self.assertRaises(IndexRenderError):
                 render_table([rec(bad)])
+
+    def test_missing_or_malformed_number_rejected(self):
+        broken = rec(U1)
+        del broken["number"]
+        with self.assertRaises(IndexRenderError):
+            render_table([broken])
+        for bad in ("1", "01", "abc", "001 ", "", 1):
+            with self.assertRaises(IndexRenderError):
+                render_table([rec(U1, bad)])
 
     def test_missing_field_rejected(self):
         broken = rec(U1)
@@ -99,13 +126,13 @@ class TestRenderTable(unittest.TestCase):
     def test_pipe_in_title_does_not_add_a_column(self):
         table = render_table([rec(U1, title="a|b", summary="c|d")])
         row = table.splitlines()[-1]
-        # Count only unescaped delimiters: 6 for a 5-column row.
+        # Count only unescaped delimiters: 7 for a 6-column row.
         unescaped = sum(
             1
             for i, ch in enumerate(row)
             if ch == "|" and (i == 0 or row[i - 1] != "\\")
         )
-        self.assertEqual(unescaped, 6, row)
+        self.assertEqual(unescaped, 7, row)
 
 
 class TestSplice(unittest.TestCase):
@@ -127,7 +154,7 @@ class TestSplice(unittest.TestCase):
 
     def test_idempotent(self):
         existing = "head\n%s\n%s\ntail\n" % (START_MARKER, END_MARKER)
-        block = render_block([rec(U1), rec(U2)])
+        block = render_block([rec(U1, "001"), rec(U2, "002")])
         once = splice(existing, block)
         self.assertEqual(splice(once, block), once)
 
@@ -141,8 +168,8 @@ class TestRenderIndex(unittest.TestCase):
         self.assertTrue(out.endswith("\n"))
 
     def test_bootstrap_then_splice_round_trip(self):
-        first = render_index(None, [rec(U1)])
-        second = render_index(first, [rec(U1), rec(U2)])
+        first = render_index(None, [rec(U1, "001")])
+        second = render_index(first, [rec(U1, "001"), rec(U2, "002")])
         self.assertIn(U2, second)
         self.assertTrue(second.startswith("# Architecture Decision Records"))
 

@@ -22,6 +22,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from adr_scribe import _frontmatter as fm  # noqa: E402
+from adr_scribe import ids  # noqa: E402
 from adr_scribe import index as idx  # noqa: E402
 
 ADR_DIRNAME = os.path.join("docs", "adr")
@@ -34,7 +35,8 @@ def load_records(adr_dir):
     if not os.path.isdir(adr_dir):
         return records, problems
     for name in sorted(os.listdir(adr_dir)):
-        if not (name.startswith("adr-") and name.endswith(".md")):
+        parsed_name = ids.parse_filename(name)
+        if parsed_name is None:
             continue
         path = os.path.join(adr_dir, name)
         try:
@@ -50,7 +52,9 @@ def load_records(adr_dir):
             problems.append("%s: missing frontmatter field(s): %s"
                             % (path, ", ".join(missing)))
             continue
-        records.append({f: parsed[f] for f in ROW_FIELDS})
+        row = {f: parsed[f] for f in ROW_FIELDS}
+        row["number"] = ids.format_number(parsed_name[0])
+        records.append(row)
     return records, problems
 
 

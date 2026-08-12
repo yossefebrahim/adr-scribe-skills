@@ -177,7 +177,9 @@ adr-scribe-skills/
 
 **Slug**: lowercase ASCII `[a-z0-9]` + single hyphens, ≤80 chars, no leading/trailing hyphen, no `..`, no separators. Derived from the decision-first title; rejected (not silently fixed) if the model supplies something else.
 
-**Filename**: `docs/adr/adr-<lowercase-ulid>-<slug>.md`.
+**Filename**: `docs/adr/<NNN>-<slug>.md` — a zero-padded display sequence number
+allocated as max+1 from records on disk (revised 2026-08-13; the ULID stays in
+frontmatter as the stable identity, so a merge-time renumber is a pure rename).
 
 **`content-digest` canonicalization** (`digest.py`) — must be byte-exact because v1.1 acceptance proves content didn't change:
 1. Copy frontmatter mapping; delete `status`, `date`, `acceptance`, `content-digest`.

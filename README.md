@@ -130,8 +130,12 @@ After approval, the skill creates:
 ```text
 docs/adr/
 ├── README.md
-└── adr-<lowercase-ulid>-<decision-first-slug>.md
+└── <NNN>-<decision-first-slug>.md   # e.g. 001-use-ulids-for-record-identity.md
 ```
+
+The sequence number is display identity only — the stable id in the record's
+frontmatter is a ULID, so renumbering after a branch merge is a pure file
+rename that can never break a content digest or a `supersedes` reference.
 
 The ADR contains:
 

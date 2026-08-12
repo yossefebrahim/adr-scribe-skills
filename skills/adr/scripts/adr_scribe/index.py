@@ -24,12 +24,14 @@ from typing import Iterable, List, Mapping, Optional, Sequence
 START_MARKER = "<!-- adr-scribe:index:start -->"
 END_MARKER = "<!-- adr-scribe:index:end -->"
 
-COLUMNS = ("ID", "Title", "Status", "Last updated", "Summary")
+COLUMNS = ("#", "ID", "Title", "Status", "Last updated", "Summary")
 
-#: Frontmatter keys each row is built from, in column order.
-_ROW_FIELDS = ("id", "title", "status", "date", "summary")
+#: Row keys, in column order. ``number`` is derived from the filename by the
+#: caller (it is display identity, not frontmatter); the rest are frontmatter.
+_ROW_FIELDS = ("number", "id", "title", "status", "date", "summary")
 
 _ULID_RE = re.compile(r"^ADR-([0-7][0-9A-HJKMNP-TV-Z]{25})$")
+_NUMBER_RE = re.compile(r"^\d{3,}$")
 _WHITESPACE_RUN = re.compile(r" {2,}")
 
 
@@ -59,12 +61,7 @@ def escape_cell(value: str) -> str:
     return out.strip()
 
 
-def _sort_key(record: Mapping[str, object]) -> str:
-    """Sort by the ULID portion of the record id, ascending.
-
-    ULIDs are lexicographically ordered by construction, so this is also
-    creation order. A malformed id is an error rather than a silent tiebreak.
-    """
+def _ulid_of(record: Mapping[str, object]) -> str:
     raw = record.get("id")
     if not isinstance(raw, str):
         raise IndexRenderError("record is missing a string 'id'")
@@ -72,6 +69,20 @@ def _sort_key(record: Mapping[str, object]) -> str:
     if match is None:
         raise IndexRenderError("record id is not a valid ADR-<ULID>: %r" % raw)
     return match.group(1)
+
+
+def _sort_key(record: Mapping[str, object]):
+    """Sort by sequence number, then ULID.
+
+    The ULID tiebreak keeps the render deterministic even when a branch merge
+    has produced duplicate numbers -- the renderer must still show that state
+    so the developer can see it; refusing it is the validator's job.
+    """
+    raw_number = record.get("number")
+    if not isinstance(raw_number, str) or not _NUMBER_RE.fullmatch(raw_number):
+        raise IndexRenderError(
+            "record %r has no zero-padded 'number' string" % record.get("id"))
+    return (int(raw_number), _ulid_of(record))
 
 
 def _row(record: Mapping[str, object]) -> str:
@@ -85,14 +96,20 @@ def _row(record: Mapping[str, object]) -> str:
 
 
 def render_table(records: Sequence[Mapping[str, object]]) -> str:
-    """Render the Markdown table body. Deterministic for any input order."""
+    """Render the Markdown table body. Deterministic for any input order.
+
+    Duplicate *ids* are an error -- two rows claiming the same record can never
+    render meaningfully. Duplicate *numbers* (a branch-merge artifact) render
+    in deterministic order instead, so the developer can see the collision;
+    ``validate-adr`` reports it as the error.
+    """
     seen = set()
     ordered = sorted(records, key=_sort_key)
     for record in ordered:
-        key = _sort_key(record)
-        if key in seen:
-            raise IndexRenderError("duplicate ADR id in index input: ADR-%s" % key)
-        seen.add(key)
+        ulid = _ulid_of(record)
+        if ulid in seen:
+            raise IndexRenderError("duplicate ADR id in index input: ADR-%s" % ulid)
+        seen.add(ulid)
 
     lines = [
         "| " + " | ".join(COLUMNS) + " |",

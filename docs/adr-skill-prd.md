@@ -26,7 +26,7 @@ Current evidence is qualitative and comes from the team's direct experience. Bef
 2. **Never invent rationale.** Every material claim is classified by provenance. Code can support what was implemented, but only a developer statement or explicit confirmation can support intent.
 3. **Fail closed.** If a material decision, driver, or rejection reason remains unsupported after the gap interview, omit it or cancel the record; never turn ambiguity into architectural law.
 4. **Make writes safe and unsurprising.** Nothing is written before approval. Approval applies to the exact proposed patch. The helper serializes adr-scribe writers, refuses detected conflicts, preserves recoverable state, and never stages, commits, pushes, or fetches.
-5. **Stay usable as the team grows.** Records receive stable, collision-resistant IDs generated locally, without sequential allocation or network access.
+5. **Stay usable as the team grows.** Records receive stable, collision-resistant IDs generated locally, without network access. Human-facing sequence numbers appear only in filenames and the index, where a merge can renumber them without changing any record's identity or digest. *(Revised 2026-08-13: sequential display numbering adopted; identity remains the ULID.)*
 6. **Create a durable source record.** Humans get a concise MADR-based narrative; future tools get versioned, machine-readable metadata and scoped rules. Automatic agent loading is not a v1 promise.
 7. **Validate internally before publishing.** Public packaging and broader portability are gated on an internal alpha, a four-developer beta, and fresh-install tests in unrelated repositories.
 
@@ -174,13 +174,13 @@ See §6 for the complete template.
 **R8. Stable IDs, index, and first-run bootstrap**
 
 - [ ] Use `ADR-<ULID>` as the stable ID; generate it locally with no Git-history or network dependency
-- [ ] Filename: `adr-<lowercase-ulid>-<decision-first-slug>.md`
+- [ ] Filename: `<NNN>-<decision-first-slug>.md`, where `<NNN>` is a zero-padded display sequence number allocated as max+1 from the records already on disk; the ULID in frontmatter remains the stable identity, so renumbering after a merge is a pure rename
 - [ ] Validate the ULID and derive the slug using only lowercase ASCII letters, digits, and single hyphens; reject separators, `..`, leading/trailing hyphens, and slugs over 80 characters
 - [ ] Construct targets relative to a verified repository directory handle and require every normalized destination to remain beneath the repository root; use no-follow directory-relative operations
 - [ ] Check the local target before preview; regenerate on collision
 - [ ] Once included in an approved preview, the ID never changes; a newly detected collision requires a new preview
 - [ ] Treat the index as generated output inside `<!-- adr-scribe:index:start -->` and `<!-- adr-scribe:index:end -->`; preserve all content outside that block
-- [ ] Sort index rows deterministically by ULID and escape Markdown table delimiters and line breaks
+- [ ] Sort index rows deterministically by sequence number with a ULID tiebreak, and escape Markdown table delimiters and line breaks; duplicate numbers render deterministically and are rejected by validation, not by the renderer
 - [ ] Include ID, title, recorded status, last-updated date, and one-line Y-statement summary from validated frontmatter; the body H1 and Y-statement must mirror the canonical `title` and `summary` values
 - [ ] Reject duplicate IDs, duplicate index rows, malformed frontmatter, and edits inside the generated block that cannot be reproduced from ADR files
 - [ ] Resolve Git merge conflicts in the generated block by regenerating it from ADR frontmatter after merge, never by treating the index as a source of truth
@@ -313,7 +313,7 @@ Chosen option: **<option>**, because <developer-stated or developer-confirmed re
 
 `date` follows MADR semantics and records the last update; `decision-date` preserves when the decision was made. Custom lifecycle and agent fields are explicitly versioned under `schema`. The preview names the intended approver; their explicit approval makes `record-confirmation` true without a post-approval mutation. `content-digest` covers the ADR body and immutable frontmatter; it excludes `status`, `date`, `acceptance`, and the digest field itself so a later acceptance-only patch can prove the decision content did not change.
 
-**Naming:** `docs/adr/adr-<lowercase-ulid>-<decision-first-slug>.md`.
+**Naming:** `docs/adr/<NNN>-<decision-first-slug>.md` (display sequence number plus slug; the ULID stays in frontmatter as the stable id).
 
 ---
 
@@ -425,7 +425,7 @@ For reproducibility, two reviewers label all merged PRs plus five opt-in session
 | D2 | `docs/adr/` is the canonical source | `applies-to` is metadata only until a future adapter projects active rules into agent-specific locations |
 | D3 | `/adr` is the only required alpha trigger | Natural-language invocation moves to internal beta and requires fresh-session evaluation |
 | D4 | Content approval writes `status: proposed` | Approval authorizes writing an already provenance-complete record; it neither accepts the architecture nor authorizes Git operations |
-| D5 | Stable IDs are locally generated ULIDs | Sequential numbers and remote allocation are removed |
+| D5 | Stable IDs are locally generated ULIDs; filenames and the index carry a display-only sequence number (revised 2026-08-13, recorded in docs/adr) | Remote allocation is removed; sequence numbers never serve as identity, so a merge-time renumber cannot break digests or references |
 | D6 | Implementation-level choices use the same significance rubric | No lighter ADR tier in v1 |
 | D7 | Confirmation may be manual | `rg`, Bash, and executable checks are optional rather than public dependencies |
 | D8 | Canonical assets use neutral placeholders | Internal conventions may be documented separately but do not leak into the public default |

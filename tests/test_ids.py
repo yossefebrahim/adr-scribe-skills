@@ -10,6 +10,8 @@ from adr_scribe.ids import (
     slugify,
     is_valid_slug,
     adr_filename,
+    format_number,
+    parse_filename,
 )
 
 class TestIds(unittest.TestCase):
@@ -138,17 +140,42 @@ class TestIds(unittest.TestCase):
         self.assertFalse(is_valid_slug(None)) # type: ignore
 
     def test_adr_filename(self):
-        ulid = new_ulid()
         slug = "valid-slug"
-        expected = f"adr-{ulid.lower()}-{slug}.md"
-        
-        self.assertEqual(adr_filename(ulid, slug), expected)
-        
+
+        self.assertEqual(adr_filename(1, slug), "001-valid-slug.md")
+        self.assertEqual(adr_filename(42, slug), "042-valid-slug.md")
+        self.assertEqual(adr_filename(1000, slug), "1000-valid-slug.md")
+
         with self.assertRaises(IdError):
-            adr_filename("invalid_ulid", slug)
-            
+            adr_filename(0, slug)
         with self.assertRaises(IdError):
-            adr_filename(ulid, "invalid_slug/")
+            adr_filename(-3, slug)
+        with self.assertRaises(IdError):
+            adr_filename("001", slug)  # type: ignore
+        with self.assertRaises(IdError):
+            adr_filename(True, slug)  # type: ignore
+        with self.assertRaises(IdError):
+            adr_filename(1, "invalid_slug/")
+
+    def test_format_number_pads_to_three_digits(self):
+        self.assertEqual(format_number(1), "001")
+        self.assertEqual(format_number(999), "999")
+        self.assertEqual(format_number(12345), "12345")
+
+    def test_parse_filename_round_trip(self):
+        self.assertEqual(parse_filename("001-valid-slug.md"), (1, "valid-slug"))
+        self.assertEqual(parse_filename("042-a.md"), (42, "a"))
+        self.assertEqual(parse_filename("1000-x-y.md"), (1000, "x-y"))
+        for number in (1, 7, 99, 100, 4321):
+            name = adr_filename(number, "some-slug")
+            self.assertEqual(parse_filename(name), (number, "some-slug"))
+
+    def test_parse_filename_rejects_non_records(self):
+        for name in ("README.md", "adr-01j000000000000000000000aa-old.md",
+                     "01-short-pad.md", "001-Bad-Case.md", "001-.md",
+                     "001-two--hyphens.md", "001-slug.txt", "001-slug.md\n",
+                     "001-slug.md.md ", None, 7):
+            self.assertIsNone(parse_filename(name), repr(name))
 
 
 class TestTrailingNewlineRegression(unittest.TestCase):
@@ -181,10 +208,12 @@ class TestTrailingNewlineRegression(unittest.TestCase):
 
     def test_adr_filename_never_contains_a_newline(self):
         with self.assertRaises(IdError):
-            adr_filename(self.VALID, "abc\n")
-        with self.assertRaises(IdError):
-            adr_filename(self.VALID + "\n", "abc")
+            adr_filename(1, "abc\n")
+
+    def test_parse_filename_rejects_trailing_newline(self):
+        self.assertIsNotNone(parse_filename("001-abc.md"))
+        self.assertIsNone(parse_filename("001-abc.md\n"))
 
     def test_no_generated_filename_contains_control_characters(self):
-        name = adr_filename(new_ulid(now_ms=1), slugify("Use ULIDs for record ids"))
+        name = adr_filename(1, slugify("Use ULIDs for record ids"))
         self.assertFalse(any(ord(ch) < 0x20 for ch in name), repr(name))

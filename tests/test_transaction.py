@@ -121,7 +121,8 @@ class Base(unittest.TestCase):
         directory = os.path.join(self.repo, "docs", "adr")
         if not os.path.isdir(directory):
             return []
-        return sorted(n for n in os.listdir(directory) if n.startswith("adr-"))
+        return sorted(n for n in os.listdir(directory)
+                      if n.endswith(".md") and n != "README.md")
 
     def tree_snapshot(self):
         entries = []
